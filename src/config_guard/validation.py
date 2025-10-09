@@ -1,10 +1,10 @@
-# src/config_guard/validation.py
 from __future__ import annotations
 
 import re
 from typing import Any, Dict
+
 from src.config_guard.exceptions import ConfigValidationError
-from src.config_guard.params import ConfigParam, CONFIG_SPECS
+from src.config_guard.params import CONFIG_SPECS, ConfigParam
 
 
 class ConfigValidator:
