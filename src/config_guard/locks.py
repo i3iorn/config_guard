@@ -1,4 +1,3 @@
-# src/config_guard/locks.py
 from __future__ import annotations
 
 from src.config_guard.exceptions import ConfigBypassError, ConfigLockedError

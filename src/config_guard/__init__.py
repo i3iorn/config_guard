@@ -1,3 +1,11 @@
+"""
+AppConfig: A robust, singleton configuration facade with validation, locking, integrity checks, and hooks.
+
+- Enforces immutability and thread safety for configuration state.
+- Supports validation, integrity, and lifecycle management.
+- Designed for extensibility and safe runtime updates.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -38,11 +46,27 @@ __all__ = [
 
 
 class AppConfig:
+    """
+    Singleton configuration manager with validation, locking, integrity, and hooks.
+
+    Direct attribute assignment is forbidden; use update(), use_once(), or get().
+    Use teardown() to clear state, and reset_singleton() for test environments.
+    """
+
     SCHEMA_VERSION = 1
     HASH_ALGORITHM = "sha256"
 
     _instance: Optional["AppConfig"] = None
     _global_lock = threading.Lock()
+
+    @classmethod
+    def reset_singleton(cls):
+        """
+        Reset the AppConfig singleton instance (for testing or re-initialization).
+        """
+        with cls._global_lock:
+            cls._instance = None
+            logger.info("AppConfig singleton reset.")
 
     def __new__(cls, *args, **kwargs):
         with cls._global_lock:
@@ -52,7 +76,7 @@ class AppConfig:
                 cls._instance = inst
             return cls._instance
 
-    def _init_state(self, initial_values: Dict[str, Any]):
+    def _init_state(self, initial_values: Dict[str, Any]) -> None:
         # internal lock for instance ops
         self.__lock = threading.Lock()
 
@@ -92,22 +116,35 @@ class AppConfig:
 
     # forbid public attribute mutation
     def __setattr__(self, name, value):
+        """
+        Forbids direct public attribute assignment to ensure immutability.
+        Use update(), use_once(), or get() for config access.
+        """
         if hasattr(self, "_AppConfig__lock") and not name.startswith("_AppConfig__"):
             raise AttributeError("Direct attribute assignment forbidden. Use update()/use_once().")
         super().__setattr__(name, value)
 
     # locking
-    def lock(self):
+    def lock(self) -> None:
+        """
+        Lock the configuration, preventing further updates until unlocked.
+        """
         with self.__lock:
             self.__lock_guard.lock()
             logger.info("AppConfig locked.")
 
-    def unlock(self, _bypass: bool = False):
+    def unlock(self, _bypass: bool = False) -> None:
+        """
+        Unlock the configuration, allowing updates. Requires bypass if locked.
+        """
         with self.__lock:
             self.__lock_guard.unlock(_bypass=_bypass)
             logger.warning("AppConfig unlocked.")
 
     def is_locked(self) -> bool:
+        """
+        Return True if the configuration is currently locked.
+        """
         with self.__lock:
             return self.__lock_guard.is_locked()
 
@@ -129,134 +166,154 @@ class AppConfig:
         self.__integrity.update_snapshot(self.__store.snapshot_internal())
         self.__hooks.run(self.__store.snapshot_internal())
 
-    def update(self, _bypass: bool = False, reason: str = "", **kwargs):
-        if self.__torn_down:
-            raise ConfigTornDownError("Config has been torn down")
-        with self.__lock:
-            self.__lock_guard.ensure_unlocked(_bypass=_bypass)
-
-            resolved_kwargs: Dict[ConfigParam, str] = {
-                self.__resolve_param(k, errors={}): v for k, v in kwargs.items()
-            }
-
-            self.__validate_input_dictionary(resolved_kwargs)
-
-            converted: Dict[ConfigParam, Any] = {
-                param: _immutable_copy(v) for param, v in resolved_kwargs.items()
-            }
-
-            self._apply_changes(converted, permanent=True, reason=reason)
-
-    def __resolve_param(
-        self, key: Union[ConfigParam, str], errors: Dict[str, str] = None
-    ) -> ConfigParam:
-        if isinstance(key, ConfigParam):
-            return key
-        try:
-            return ConfigParam(key.upper())
-        except ValueError as e:
-            if errors is not None:
-                errors[key] = "Unknown parameter"
-                return None
-            else:
-                raise ConfigValidationError({key: "Unknown parameter"}) from e
-
-    def __validate_input_dictionary(self, input_dict: Dict[ConfigParam, Any]) -> None:
+    def _validate_and_resolve(
+        self, input_dict: Dict[str, Any], *, bypass: bool = False, context: str = "update"
+    ) -> Dict[ConfigParam, Any]:
+        """
+        Helper to resolve and validate input values for config updates.
+        Returns a dict of ConfigParam to immutable value, or raises ConfigValidationError.
+        """
         errors: Dict[str, str] = {}
+        resolved: Dict[ConfigParam, Any] = {}
         for k, v in input_dict.items():
-            val = _immutable_copy(v)
+            param = self.__resolve_param(k)
             try:
-                self.__validator.validate_value(k, val)
+                if not bypass:
+                    self.__validator.validate_value(param, v)
+                resolved[param] = _immutable_copy(v)
             except ConfigValidationError as exc:
                 errors.update(exc.errors)
+                logger.error(f"Validation error for {k} in {context}: {exc.errors}")
+            except Exception as exc:
+                errors[k] = str(exc)
+                logger.error(f"Error resolving {k} in {context}: {exc}")
         if errors:
+            logger.error(f"{context} failed with errors: {errors}")
             raise ConfigValidationError(errors)
+        return resolved
 
-    def use_once(self, _bypass: bool = False, reason: str = "", **kwargs):
+    def __resolve_param(self, key: Union[ConfigParam, str]) -> ConfigParam:
+        if isinstance(key, ConfigParam):
+            return key
+        elif isinstance(key, str):
+            key = key.strip().upper()
+            try:
+                return ConfigParam(key)
+            except ValueError as exc:
+                raise ConfigValidationError({key: "Invalid configuration parameter name."}) from exc
+        else:
+            raise ConfigValidationError(
+                {str(key): f"Key must be a ConfigParam or string. Not {type(key)}."}
+            )
+
+    def update(self, _bypass: bool = False, reason: str = "", **kwargs) -> None:
+        """
+        Update configuration parameters permanently. Validates input and logs errors.
+        """
         if self.__torn_down:
+            logger.error("Attempted update after teardown.")
             raise ConfigTornDownError("Config has been torn down")
         with self.__lock:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
-            converted: Dict[ConfigParam, Any] = {}
-            errors: Dict[str, str] = {}
-            for k, v in kwargs.items():
-                param = self.__resolve_param(k, errors)
-                if param:
-                    val = _immutable_copy(v)
-                    if not _bypass:
-                        try:
-                            self.__validator.validate_value(param, val)
-                        except ConfigValidationError as exc:
-                            errors.update(exc.errors)
-                    converted[param] = val
-            if errors:
-                raise ConfigValidationError(errors)
-            self._apply_changes(converted, permanent=False, reason=reason)
+            resolved_kwargs = self._validate_and_resolve(kwargs, bypass=_bypass, context="update")
+            self._apply_changes(resolved_kwargs, permanent=True, reason=reason)
+
+    def use_once(self, _bypass: bool = False, reason: str = "", **kwargs) -> None:
+        """
+        Temporarily update configuration for the current session. Validates input and logs errors.
+        """
+        if self.__torn_down:
+            logger.error("Attempted use_once after teardown.")
+            raise ConfigTornDownError("Config has been torn down")
+        with self.__lock:
+            self.__lock_guard.ensure_unlocked(_bypass=_bypass)
+            resolved_kwargs = self._validate_and_resolve(kwargs, bypass=_bypass, context="use_once")
+            self._apply_changes(resolved_kwargs, permanent=False, reason=reason)
 
     def get(self, key: Union[ConfigParam, str], default: Any = None) -> Any:
+        """
+        Get the value of a configuration parameter.
+        """
         if self.__torn_down:
+            logger.error("Attempted get after teardown.")
             raise ConfigTornDownError("Config has been torn down")
-
         key = self.__resolve_param(key)
-
         with self.__lock:
             return self.__store.get(key, default)
 
     def snapshot(self) -> MappingProxyType:
+        """
+        Return a snapshot of the current configuration as a read-only dictionary.
+        """
         with self.__lock:
-            return self.__store.snapshot_public()
+            return MappingProxyType(dict(self.__store.snapshot_public()))
 
-    def restore_from_snapshot(self, snapshot: Dict[str, Any], _bypass: bool = False):
+    def restore_from_snapshot(self, snapshot: Dict[str, Any], _bypass: bool = False) -> None:
+        """
+        Restore configuration from a snapshot dictionary.
+        """
         if self.__torn_down:
+            logger.error("Attempted restore_from_snapshot after teardown.")
             raise ConfigTornDownError("Config has been torn down")
         with self.__lock:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
-
-            resolved_kwargs = {self.__resolve_param(k, errors={}): v for k, v in snapshot.items()}
-            self.__validate_input_dictionary(resolved_kwargs)
-            converted: Dict[ConfigParam, Any] = {
-                param: _immutable_copy(v) for param, v in resolved_kwargs.items()
-            }
-
-            self.__store.restore(converted)
+            resolved_kwargs = self._validate_and_resolve(
+                snapshot, bypass=_bypass, context="restore_from_snapshot"
+            )
+            self.__store.restore(resolved_kwargs)
             self.__integrity.update_snapshot(self.__store.snapshot_internal())
             self.__hooks.run(self.__store.snapshot_internal())
 
-    # hooks
-    def register_post_update_hook(self, func):
+    def register_post_update_hook(self, func) -> None:
+        """
+        Register a function to be called after each update.
+        """
         with self.__lock:
             self.__hooks.register(func)
 
-    # context manager
     @contextmanager
-    def temp_update(self, **kwargs) -> Iterator[None]:
+    def temp_update(self, _bypass: bool = False, **kwargs) -> Iterator[None]:
+        """
+        Context manager for temporary configuration changes. Restores state on exit.
+        Logs exceptions raised within the context.
+        Set _bypass=True to skip validation (for advanced/internal use).
+        """
         with self.__lock:
             prior_config = self.__store.snapshot_internal()
             prior_checksum = self.__integrity.last_checksum
             try:
-                self.update(**kwargs)
+                resolved_kwargs = self._validate_and_resolve(
+                    kwargs, bypass=_bypass, context="temp_update"
+                )
+                self._apply_changes(resolved_kwargs, permanent=True, reason="temp_update")
                 yield
+            except Exception as exc:
+                logger.error(f"Exception in temp_update context: {exc}")
+                raise
             finally:
                 self.__store.restore(prior_config)
-                # restore integrity snapshot/checksum
                 self.__integrity.update_snapshot(prior_config)
-                # overwrite checksum to original sealed value if present
-                # note: update_snapshot recomputes; if you need exact previous sealed value, track separately
                 if prior_checksum:
-                    # recompute then set back to prior to avoid false positives
-                    self.__integrity._last_checksum = prior_checksum  # internal, acceptable here
+                    self.__integrity._last_checksum = prior_checksum
 
-    # integrity
     def verify_integrity(self) -> bool:
+        """
+        Verify the integrity of the current configuration.
+        """
         with self.__lock:
             return self.__integrity.verify()
 
     def memory_fingerprint(self) -> str:
+        """
+        Return a fingerprint of the current configuration state.
+        """
         with self.__lock:
             return self.__integrity.memory_fingerprint()
 
-    # teardown
-    def teardown(self):
+    def teardown(self) -> None:
+        """
+        Tear down the configuration, clearing all state and hooks.
+        """
         with self.__lock:
             self.__torn_down = True
             self.__store.clear()
@@ -266,7 +323,9 @@ class AppConfig:
             self.__last_modified_at = None
             self.__last_change_reason = None
 
-    # repr
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """
+        Return a string representation of the AppConfig instance.
+        """
         with self.__lock:
             return f"<AppConfig locked={self.__lock_guard.is_locked()} checksum={self.__integrity.last_checksum}>"

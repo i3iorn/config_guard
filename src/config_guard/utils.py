@@ -5,9 +5,10 @@ import json
 import os
 from copy import deepcopy
 from types import MappingProxyType
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
-from src.config_guard import ConfigParam
+if TYPE_CHECKING:
+    from src.config_guard import ConfigParam
 
 
 def _immutable_copy(value: Any) -> Any:
@@ -30,7 +31,7 @@ def _stable_serialize_for_checksum(data: Dict[ConfigParam, Any]) -> bytes:
     return json.dumps(out, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
-def _checksum_of_config(snapshot: Dict[ConfigParam, Any], algorithm: str= "sha256") -> str:
+def _checksum_of_config(snapshot: Dict[ConfigParam, Any], algorithm: str = "sha256") -> str:
     b = _stable_serialize_for_checksum(snapshot)
     return hashlib.new(algorithm, b).hexdigest()
 
