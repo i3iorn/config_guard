@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "config-guard"
+version = "0.1.0"
+description = "Config facade with validation, locking, integrity, and hooks."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=7",
+  "coverage>=7.0",
+  "mypy>=1.18",
+  "ruff>=0.14",
+  "black>=25",
+  "isort>=6",
+  "pre-commit>=4.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/i3iorn/config-guard"
+Issues = "https://github.com/i3iorn/config-guard/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/config_guard"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/**", "README.md", "LICENSE*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+pretty = true
+strict = true
+mypy_path = ["src"]
+warn_unused_configs = true
+ignore_missing_imports = false
+namespace_packages = true
+explicit_package_bases = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+extend-exclude = "/(build|dist|.venv)/"
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["config_guard"]
+src_paths = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/config_guard"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
