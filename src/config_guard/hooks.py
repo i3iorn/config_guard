@@ -1,8 +1,8 @@
-# src/config_guard/hooks.py
 from __future__ import annotations
 
 import logging
 from typing import Any, Callable, Dict, List
+
 from src.config_guard.params import ConfigParam
 
 logger = logging.getLogger("app_config_secure")
