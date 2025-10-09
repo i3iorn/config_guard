@@ -6,9 +6,8 @@ import logging
 import threading
 import warnings
 from contextlib import contextmanager
-from copy import deepcopy
-from typing import Any, Dict, Iterator, Optional, Union
 from types import MappingProxyType
+from typing import Any, Dict, Iterator, Optional, Union
 
 from src.config_guard.exceptions import (
     ConfigBypassError,
@@ -16,16 +15,26 @@ from src.config_guard.exceptions import (
     ConfigTornDownError,
     ConfigValidationError,
 )
-from src.config_guard.params import ConfigParam, CONFIG_SPECS
+from src.config_guard.hooks import HookBus
+from src.config_guard.integrity import IntegrityGuard
+from src.config_guard.locks import LockGuard
+from src.config_guard.params import CONFIG_SPECS, ConfigParam
+from src.config_guard.store import ConfigStore
 from src.config_guard.utils import _immutable_copy, _require_bypass_env
 from src.config_guard.validation import ConfigValidator
-from src.config_guard.store import ConfigStore
-from src.config_guard.locks import LockGuard
-from src.config_guard.integrity import IntegrityGuard
-from src.config_guard.hooks import HookBus
 
 logger = logging.getLogger("app_config_secure")
 logger.addHandler(logging.NullHandler())
+
+
+__all__ = [
+    "AppConfig",
+    "ConfigValidationError",
+    "ConfigLockedError",
+    "ConfigBypassError",
+    "ConfigTornDownError",
+    "ConfigParam",
+]
 
 
 class AppConfig:
@@ -67,7 +76,9 @@ class AppConfig:
             if bypass_startup:
                 if not _require_bypass_env():
                     raise ConfigBypassError("Startup bypass requires ALLOW_CONFIG_BYPASS=1")
-                warnings.warn(f"Startup bypass for {param.value}={val!r}", UserWarning)
+                warnings.warn(
+                    f"Startup bypass for {param.value}={val!r}", UserWarning, stacklevel=2
+                )
             else:
                 self.__validator.validate_value(param, val)
             self.__store.set(param, val, permanent=True)
@@ -118,14 +129,13 @@ class AppConfig:
         self.__integrity.update_snapshot(self.__store.snapshot_internal())
         self.__hooks.run(self.__store.snapshot_internal())
 
-
     def update(self, _bypass: bool = False, reason: str = "", **kwargs):
         if self.__torn_down:
             raise ConfigTornDownError("Config has been torn down")
         with self.__lock:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
 
-            resolved_kwargs = {
+            resolved_kwargs: Dict[ConfigParam, str] = {
                 self.__resolve_param(k, errors={}): v for k, v in kwargs.items()
             }
 
@@ -137,17 +147,19 @@ class AppConfig:
 
             self._apply_changes(converted, permanent=True, reason=reason)
 
-    def __resolve_param(self, key: Union[ConfigParam, str], errors: Dict[str, str] = None) -> ConfigParam:
+    def __resolve_param(
+        self, key: Union[ConfigParam, str], errors: Dict[str, str] = None
+    ) -> ConfigParam:
         if isinstance(key, ConfigParam):
             return key
         try:
             return ConfigParam(key.upper())
-        except ValueError:
+        except ValueError as e:
             if errors is not None:
                 errors[key] = "Unknown parameter"
                 return None
             else:
-                raise ConfigValidationError({key: "Unknown parameter"})
+                raise ConfigValidationError({key: "Unknown parameter"}) from e
 
     def __validate_input_dictionary(self, input_dict: Dict[ConfigParam, Any]) -> None:
         errors: Dict[str, str] = {}
@@ -200,9 +212,7 @@ class AppConfig:
         with self.__lock:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
 
-            resolved_kwargs = {
-                self.__resolve_param(k, errors={}): v for k, v in snapshot.items()
-            }
+            resolved_kwargs = {self.__resolve_param(k, errors={}): v for k, v in snapshot.items()}
             self.__validate_input_dictionary(resolved_kwargs)
             converted: Dict[ConfigParam, Any] = {
                 param: _immutable_copy(v) for param, v in resolved_kwargs.items()
