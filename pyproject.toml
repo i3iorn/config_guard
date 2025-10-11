@@ -9,7 +9,7 @@ description = "Config facade with validation, locking, integrity, and hooks."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Björn Schrammel", email = "configguard@schrammel.dev" }]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
