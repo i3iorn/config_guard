@@ -7,12 +7,15 @@ import os
 import threading
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional
-from src.config_guard.params import ConfigParam
-from src.config_guard.utils import _checksum_of_config
+
+from config_guard.params import ConfigParam
+from config_guard.utils import _checksum_of_config
 
 
 class IntegrityGuard:
     def __init__(self, hash_algorithm: str = "sha256") -> None:
+        if not hasattr(hashlib, hash_algorithm):
+            raise ValueError(f"Unknown hash algorithm: {hash_algorithm}")
         self._algo = hash_algorithm
         self._last_snapshot: Optional[Dict[ConfigParam, Any]] = None
         self._last_checksum: Optional[str] = None
@@ -40,13 +43,16 @@ class IntegrityGuard:
         sealed = self.seal_checksum(raw)
         return sealed == self._last_checksum
 
-    def start_checker(self, *, is_torn_down: Callable[[], bool], on_violation: Callable[[str], None]) -> None:
+    def start_checker(
+        self, *, is_torn_down: Callable[[], bool], on_violation: Callable[[str], None]
+    ) -> None:
         def _loop():
             evt = threading.Event()
             while not is_torn_down():
                 if not self.verify():
                     on_violation("AppConfig integrity violation detected")
-                evt.wait(60)
+                evt.wait(10)
+
         t = threading.Thread(target=_loop, daemon=True)
         t.start()
         self._checker_thread = t
@@ -57,6 +63,10 @@ class IntegrityGuard:
             "checksum": self._last_checksum,
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    def join(self) -> None:
+        if self._checker_thread:
+            self._checker_thread.join()
 
     def clear(self) -> None:
         self._last_snapshot = None
