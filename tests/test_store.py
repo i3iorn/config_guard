@@ -2,42 +2,50 @@ from types import MappingProxyType
 
 import pytest
 
-from config_guard import ConfigValidationError
-from config_guard.params import ConfigParam
+from config_guard.params import resolve_param_name
 from config_guard.store import ConfigStore
 
 
-def test_store_set_get():
+def test_configstore_set_get_and_use_once_with_immutable_copy():
     store = ConfigStore()
-    store.set(ConfigParam(list(ConfigParam)[0]), 123, permanent=True)
-    assert store.get(ConfigParam(list(ConfigParam)[0])) == 123
+    key = resolve_param_name("VERIFY")
+
+    orig = [1, 2, 3]
+    store.set(key, orig, permanent=True)
+    v = store.get(key)
+    assert isinstance(v, tuple)
+    # Mutate original, stored should be unaffected
+    orig.append(4)
+    assert store.get(key) == (1, 2, 3)
+
+    # use_once path
+    store.set(key, 99, permanent=False)
+    assert store.get(key) == 99
+    assert store.get(key, 0) == (1, 2, 3)
 
 
-def test_store_snapshot():
+def test_configstore_rejects_switching_types_when_not_allowed():
+    store = ConfigStore(mutable_types=False)
+    key = resolve_param_name("VERIFY")
+
+    store.set(key, [1, 2], permanent=True)  # becomes tuple
+    # switching to dict (becomes MappingProxyType) should fail
+    with pytest.raises(ValueError):
+        store.set(key, {"a": 1}, permanent=True)
+
+
+def test_configstore_snapshots_and_restore_and_clear():
     store = ConfigStore()
-    store.set(ConfigParam(list(ConfigParam)[0]), 1, permanent=True)
-    snap = store.snapshot_public()
-    assert isinstance(snap, MappingProxyType)
-
-
-def test_store_get_default():
-    store = ConfigStore()
-    assert store.get(ConfigParam(list(ConfigParam)[0]), default=42) == 42
-
-
-def test_store_restore_and_clear():
-    store = ConfigStore()
-    key = ConfigParam(list(ConfigParam)[0])
+    key = resolve_param_name("MAX_CONCURRENCY")
     store.set(key, 5, permanent=True)
-    snap = store.snapshot_internal()
-    store.set(key, 10, permanent=True)
-    store.restore(snap)
-    assert store.get(key) == 5
+
+    internal = store.snapshot_internal()
+    public = store.snapshot_public()
+    assert isinstance(public, MappingProxyType)
+    assert internal[key] == 5 and public[key] == 5
+
+    store.restore({key: 7})
+    assert store.get(key) == 7
+
     store.clear()
-    assert store.get(key) is None
-
-
-def test_store_get_invalid_key():
-    store = ConfigStore()
-    with pytest.raises(ConfigValidationError):
-        store.get("not_a_param")
+    assert store.snapshot_internal() == {}

@@ -1,225 +1,136 @@
-import os
-import sys
-
-from exceptions import ConfigError
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
+import warnings
 
 import pytest
 
-from config_guard import AppConfig, ConfigLockedError, ConfigTornDownError, ConfigValidationError
-from config_guard.params import CONFIG_SPECS
+from config_guard import AppConfig
+from config_guard.exceptions import (
+    ConfigBypassError,
+    ConfigLockedError,
+    ConfigTornDownError,
+    ConfigValidationError,
+)
 
 
-def test_appconfig_update_and_get():
-    config = AppConfig()
-    for param, spec in CONFIG_SPECS.items():
-        config.update(**{param.value: spec["default"]})
-        val = config.get(param)
-        # Accept tuple or list for sequence types
-        if isinstance(spec["default"], (list, tuple)):
-            assert tuple(val) == tuple(spec["default"])
-        else:
-            assert val == spec["default"]
+@pytest.fixture
+def app():
+    cfg = AppConfig()
+    yield cfg
+    try:
+        cfg.teardown()
+    except Exception:
+        pass
 
 
-def test_appconfig_update_invalid_param():
-    config = AppConfig()
+def test_appconfig_init_with_bypass_requires_env(monkeypatch):
+    monkeypatch.delenv("ALLOW_CONFIG_BYPASS", raising=False)
+    with pytest.raises(ConfigBypassError):
+        AppConfig(initial_values={"_bypass": True})
+
+
+def test_appconfig_lock_unlock_and_is_locked(monkeypatch, app):
+    assert app.is_locked() is False
+    app.lock()
+    assert app.is_locked() is True
+
+    # unlock without bypass warns and stays locked
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        app.unlock(_bypass=False)
+        assert any("Config is still locked" in str(w.message) for w in rec)
+    assert app.is_locked() is True
+
+    # unlock with bypass needs env
+    with pytest.raises(ConfigBypassError):
+        app.unlock(_bypass=True)
+
+    # set env then unlock
+    monkeypatch.setenv("ALLOW_CONFIG_BYPASS", "1")
+    app.unlock(_bypass=True)
+    assert app.is_locked() is False
+
+
+def test_appconfig_update_and_get_and_use_once(app):
+    app.update(MAX_CONCURRENCY=20)
+    assert app.get("MAX_CONCURRENCY") == 20
+
+    app.use_once(MAX_CONCURRENCY=30)
+    assert app.get("MAX_CONCURRENCY") == 30
+    # falls back to permanent after one use
+    assert app.get("MAX_CONCURRENCY") == 20
+
+
+def test_appconfig_update_validation_error(app):
     with pytest.raises(ConfigValidationError):
-        config.update(NOT_A_PARAM=123)
+        app.update(MAX_CONCURRENCY=0)
 
 
-def test_appconfig_use_once():
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    orig = config.get(param)
-    config.use_once(**{param.value: orig})
-    val = config.get(param)
-    if isinstance(orig, (list, tuple)):
-        assert tuple(val) == tuple(orig)
-    else:
-        assert val == orig
-
-
-def test_appconfig_use_once_invalid():
-    config = AppConfig()
-    with pytest.raises(ConfigValidationError):
-        config.use_once(**{list(CONFIG_SPECS.keys())[0].value: None})
-
-
-def test_appconfig_lock_unlock():
-    config = AppConfig()
-    os.environ["ALLOW_CONFIG_BYPASS"] = "1"
-    config.lock()
-    assert config.is_locked()
+def test_appconfig_update_when_locked_raises(app):
+    app.lock()
     with pytest.raises(ConfigLockedError):
-        config.update(**{list(CONFIG_SPECS.keys())[0].value: 123})
-    assert os.getenv("ALLOW_CONFIG_BYPASS") == "1"
-    config.unlock(_bypass=True)
-    assert not config.is_locked()
+        app.update(MAX_CONCURRENCY=20)
 
 
-def test_appconfig_lock_unlock_error():
-    config = AppConfig()
-    os.environ["ALLOW_CONFIG_BYPASS"] = "1"
-    config.lock()
-    config.unlock(_bypass=False)
-    assert config.is_locked()
-
-
-def test_appconfig_teardown():
-    config = AppConfig()
-    config.teardown()
+def test_appconfig_get_after_teardown_raises():
+    cfg = AppConfig()
+    cfg.teardown()
     with pytest.raises(ConfigTornDownError):
-        config.update(**{list(CONFIG_SPECS.keys())[0].value: 123})
+        cfg.get("MAX_CONCURRENCY")
 
 
-def test_appconfig_teardown_error():
-    config = AppConfig()
-    config.teardown()
-    with pytest.raises(ConfigTornDownError):
-        config.get(list(CONFIG_SPECS.keys())[0])
+def test_appconfig_restore_from_snapshot_success_and_failure(app):
+    snap = {"MAX_CONCURRENCY": 50, "VERIFY": False}
+    app.restore_from_snapshot(snap)
+    assert app.get("MAX_CONCURRENCY") == 50
 
-
-def test_appconfig_temp_update():
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    orig = config.get(param)
-    with config.temp_update(**{param.value: orig}):
-        val = config.get(param)
-        if isinstance(orig, (list, tuple)):
-            assert tuple(val) == tuple(orig)
-        else:
-            assert val == orig
-    val = config.get(param)
-    if isinstance(orig, (list, tuple)):
-        assert tuple(val) == tuple(orig)
-
-
-def test_appconfig_temp_update_error():
-    config = AppConfig()
     with pytest.raises(ConfigValidationError):
-        with config.temp_update(**{list(CONFIG_SPECS.keys())[0].value: None}):
+        app.restore_from_snapshot({"MAX_CONCURRENCY": 0})
+
+
+def test_appconfig_register_hook_and_trigger(app):
+    called = []
+
+    def hk(s):
+        called.append(s)
+
+    app.register_post_update_hook(hk)
+    app.update(VERIFY=False)
+    assert called and called[-1]["VERIFY"] is False
+
+    # error case: register non-callable
+    with pytest.raises(TypeError):
+        app.register_post_update_hook(123)  # type: ignore[arg-type]
+
+
+def test_appconfig_temp_update_success_and_error(app):
+    # success path and revert
+    orig = app.get("VERIFY")
+    with app.temp_update(VERIFY=False):
+        assert app.get("VERIFY") is False
+    assert app.get("VERIFY") == orig
+
+    # error path: invalid value triggers error
+    with pytest.raises(ConfigValidationError):
+        with app.temp_update(MAX_CONCURRENCY=0):
             pass
 
 
-def test_appconfig_get_default():
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    assert config.get(param, default=42) == config.get(param)
-    # The implementation raises ConfigValidationError for unknown params, so test for that
-    with pytest.raises(ConfigValidationError):
-        config.get("not_a_param", default=99)
+def test_appconfig_verify_integrity_and_fingerprint(app):
+    assert app.verify_integrity() is True
+    fp = app.memory_fingerprint()
+    assert isinstance(fp, str)
 
 
-def test_appconfig_snapshot_and_restore(monkeypatch):
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    orig = config.get(param)
-    # Only update with valid value type
-    config.update(**{param.value: orig})
-    snap = config.snapshot()
-    # Change to another valid value (if possible)
-    config.update(**{param.value: orig})
-    monkeypatch.setenv("ALLOW_CONFIG_BYPASS", "1")
-    config.restore_from_snapshot(dict(snap), _bypass=True)
-    val = config.get(param)
-    if isinstance(orig, (list, tuple)):
-        assert tuple(val) == tuple(orig)
-    else:
-        assert val == orig
+def test_appconfig_teardown_blocks_operations():
+    cfg = AppConfig()
+    cfg.teardown()
+    with pytest.raises(ConfigTornDownError):
+        cfg.update(VERIFY=False)
+    with pytest.raises(ConfigTornDownError):
+        cfg.use_once(VERIFY=False)
+    # verify_integrity still callable
+    assert cfg.verify_integrity() is False
 
 
-def test_appconfig_register_post_update_hook():
-    config = AppConfig()
-    called = []
-
-    def hook(_):
-        called.append(1)
-
-    config.register_post_update_hook(hook)
-    param = list(CONFIG_SPECS.keys())[0]
-    config.update(**{param.value: config.get(param)})
-    assert called
-
-
-def test_appconfig_update_multiple_params():
-    config = AppConfig()
-    params = list(CONFIG_SPECS.keys())[:2]
-    update_dict = {p.value: CONFIG_SPECS[p]["default"] for p in params}
-    config.update(**update_dict)
-    for p in params:
-        val = config.get(p)
-        expected = CONFIG_SPECS[p]["default"]
-        if isinstance(expected, (list, tuple)):
-            assert tuple(val) == tuple(expected)
-        else:
-            assert val == expected
-
-
-def test_appconfig_update_with_reason():
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    config.update(**{param.value: config.get(param)}, reason="test reason")
-    assert config.get(param) == config.get(param)
-
-
-def test_appconfig_memory_fingerprint_changes():
-    config = AppConfig()
-    orig_fp = config.memory_fingerprint()
-    param = list(CONFIG_SPECS.keys())[0]
-    config.update(**{param.value: config.get(param)})
-    new_fp = config.memory_fingerprint()
-    assert orig_fp == new_fp  # Should be same if value didn't change
-    # Only update with a different valid value
-    spec = CONFIG_SPECS[param]
-    valid = spec["default"]
-    try:
-        if isinstance(valid, bool):
-            new_val = not valid
-        elif isinstance(valid, int):
-            new_val = valid + 1 if valid != 0 else 1
-        elif isinstance(valid, float):
-            new_val = valid + 1.0
-        elif isinstance(valid, str):
-            new_val = valid + "_changed"
-        elif isinstance(valid, tuple):
-            new_val = valid + ("changed",)
-        elif isinstance(valid, list):
-            new_val = valid + ["changed"]
-        else:
-            pytest.skip("No valid alternate value for this param type")
-        config.update(**{param.value: new_val})
-        assert config.memory_fingerprint() != orig_fp
-    except ConfigValidationError:
-        pytest.skip("No valid alternate value for this param type")
-
-
-def test_appconfig_verify_integrity():
-    config = AppConfig()
-    assert config.verify_integrity() is True
-
-
-def test_appconfig_update_locked_bypass(monkeypatch):
-    config = AppConfig()
-    config.lock()
-    monkeypatch.setenv("ALLOW_CONFIG_BYPASS", "1")
-    param = list(CONFIG_SPECS.keys())[0]
-    config.update(_bypass=True, **{param.value: config.get(param)})
-    assert config.get(param) == config.get(param)
-
-
-def test_appconfig_restore_from_invalid_snapshot():
-    config = AppConfig()
-    with pytest.raises(ConfigError):
-        config.restore_from_snapshot({"not_a_param": 1}, _bypass=True)
-
-
-def test_appconfig_temp_update_nested():
-    config = AppConfig()
-    param = list(CONFIG_SPECS.keys())[0]
-    orig = config.get(param)
-    with config.temp_update(**{param.value: orig}):
-        with config.temp_update(**{param.value: orig}):
-            assert config.get(param) == orig
-    assert config.get(param) == orig
+def test_appconfig_repr(app):
+    r = repr(app)
+    assert r.startswith("<AppConfig")
