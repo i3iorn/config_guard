@@ -4,8 +4,9 @@ from __future__ import annotations
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Dict, Union
-from src.config_guard.params import ConfigParam
-from src.config_guard.utils import _immutable_copy
+
+from config_guard.params import ConfigParam
+from config_guard.utils import _immutable_copy
 
 
 class ConfigStore:
@@ -18,8 +19,8 @@ class ConfigStore:
         tgt[key] = _immutable_copy(value)
 
     def get(self, key: Union[ConfigParam, str], default: Any = None) -> Any:
-        if isinstance(key, str):
-            key = ConfigParam(key)
+        key = ConfigParam.resolve(key)
+
         if key in self._use_once:
             val = self._use_once.pop(key)
             return deepcopy(val)
