@@ -17,19 +17,19 @@ from contextlib import contextmanager
 from types import MappingProxyType
 from typing import Any, Dict, Iterator, Optional, Union
 
-from src.config_guard.exceptions import (
+from config_guard.exceptions import (
     ConfigBypassError,
     ConfigLockedError,
     ConfigTornDownError,
     ConfigValidationError,
 )
-from src.config_guard.hooks import HookBus
-from src.config_guard.integrity import IntegrityGuard
-from src.config_guard.locks import LockGuard
-from src.config_guard.params import CONFIG_SPECS, ConfigParam
-from src.config_guard.store import ConfigStore
-from src.config_guard.utils import _immutable_copy, _require_bypass_env
-from src.config_guard.validation import ConfigValidator
+from config_guard.hooks import HookBus
+from config_guard.integrity import IntegrityGuard
+from config_guard.locks import LockGuard
+from config_guard.params import CONFIG_SPECS, ConfigParam
+from config_guard.store import ConfigStore
+from config_guard.utils import _immutable_copy, _require_bypass_env
+from config_guard.validation import ConfigValidator
 
 logger = logging.getLogger("app_config_secure")
 logger.addHandler(logging.NullHandler())
@@ -56,29 +56,11 @@ class AppConfig:
     SCHEMA_VERSION = 1
     HASH_ALGORITHM = "sha256"
 
-    _instance: Optional["AppConfig"] = None
-    _global_lock = threading.Lock()
+    _global_lock = threading.RLock()
 
-    @classmethod
-    def reset_singleton(cls):
-        """
-        Reset the AppConfig singleton instance (for testing or re-initialization).
-        """
-        with cls._global_lock:
-            cls._instance = None
-            logger.info("AppConfig singleton reset.")
-
-    def __new__(cls, *args, **kwargs):
-        with cls._global_lock:
-            if cls._instance is None:
-                inst = super().__new__(cls)
-                inst._init_state(kwargs)
-                cls._instance = inst
-            return cls._instance
-
-    def _init_state(self, initial_values: Dict[str, Any]) -> None:
+    def __init__(self, initial_values: Dict[str, Any] = None) -> None:
         # internal lock for instance ops
-        self.__lock = threading.Lock()
+        self.__lock = threading.RLock()
 
         # components
         self.__lock_guard = LockGuard()
@@ -92,6 +74,9 @@ class AppConfig:
         self.__last_modified_by: Optional[str] = None
         self.__last_modified_at: Optional[datetime.datetime] = None
         self.__last_change_reason: Optional[str] = None
+
+        if initial_values is None:
+            initial_values = {}
 
         # init values
         bypass_startup = bool(initial_values.pop("_bypass", False))
@@ -161,7 +146,7 @@ class AppConfig:
         for param, val in changes.items():
             self.__store.set(param, val, permanent=permanent)
         self.__last_modified_by = self._caller_id()
-        self.__last_modified_at = datetime.datetime.utcnow()
+        self.__last_modified_at = datetime.datetime.now(tz=datetime.timezone.utc)
         self.__last_change_reason = reason
         self.__integrity.update_snapshot(self.__store.snapshot_internal())
         self.__hooks.run(self.__store.snapshot_internal())
@@ -172,43 +157,32 @@ class AppConfig:
         """
         Helper to resolve and validate input values for config updates.
         Returns a dict of ConfigParam to immutable value, or raises ConfigValidationError.
+        Error messages include context and parameter name for clarity.
         """
         errors: Dict[str, str] = {}
         resolved: Dict[ConfigParam, Any] = {}
         for k, v in input_dict.items():
-            param = self.__resolve_param(k)
+            param = ConfigParam.resolve(k)
             try:
                 if not bypass:
                     self.__validator.validate_value(param, v)
                 resolved[param] = _immutable_copy(v)
             except ConfigValidationError as exc:
-                errors.update(exc.errors)
+                for err_key, err_msg in exc.errors.items():
+                    errors[err_key] = f"[{context}] {err_msg}"
                 logger.error(f"Validation error for {k} in {context}: {exc.errors}")
             except Exception as exc:
-                errors[k] = str(exc)
+                errors[str(k)] = f"[{context}] {str(exc)}"
                 logger.error(f"Error resolving {k} in {context}: {exc}")
         if errors:
             logger.error(f"{context} failed with errors: {errors}")
             raise ConfigValidationError(errors)
         return resolved
 
-    def __resolve_param(self, key: Union[ConfigParam, str]) -> ConfigParam:
-        if isinstance(key, ConfigParam):
-            return key
-        elif isinstance(key, str):
-            key = key.strip().upper()
-            try:
-                return ConfigParam(key)
-            except ValueError as exc:
-                raise ConfigValidationError({key: "Invalid configuration parameter name."}) from exc
-        else:
-            raise ConfigValidationError(
-                {str(key): f"Key must be a ConfigParam or string. Not {type(key)}."}
-            )
-
     def update(self, _bypass: bool = False, reason: str = "", **kwargs) -> None:
         """
         Update configuration parameters permanently. Validates input and logs errors.
+        Logs info on success.
         """
         if self.__torn_down:
             logger.error("Attempted update after teardown.")
@@ -217,10 +191,12 @@ class AppConfig:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
             resolved_kwargs = self._validate_and_resolve(kwargs, bypass=_bypass, context="update")
             self._apply_changes(resolved_kwargs, permanent=True, reason=reason)
+            logger.info(f"Config updated: {list(resolved_kwargs.keys())}")
 
     def use_once(self, _bypass: bool = False, reason: str = "", **kwargs) -> None:
         """
         Temporarily update configuration for the current session. Validates input and logs errors.
+        Logs info on success.
         """
         if self.__torn_down:
             logger.error("Attempted use_once after teardown.")
@@ -229,6 +205,7 @@ class AppConfig:
             self.__lock_guard.ensure_unlocked(_bypass=_bypass)
             resolved_kwargs = self._validate_and_resolve(kwargs, bypass=_bypass, context="use_once")
             self._apply_changes(resolved_kwargs, permanent=False, reason=reason)
+            logger.info(f"Config temporarily updated: {list(resolved_kwargs.keys())}")
 
     def get(self, key: Union[ConfigParam, str], default: Any = None) -> Any:
         """
@@ -237,20 +214,21 @@ class AppConfig:
         if self.__torn_down:
             logger.error("Attempted get after teardown.")
             raise ConfigTornDownError("Config has been torn down")
-        key = self.__resolve_param(key)
+        key = ConfigParam.resolve(key)
         with self.__lock:
             return self.__store.get(key, default)
 
     def snapshot(self) -> MappingProxyType:
         """
-        Return a snapshot of the current configuration as a read-only dictionary.
+        Return a snapshot of the current configuration as a plain dictionary.
         """
         with self.__lock:
-            return MappingProxyType(dict(self.__store.snapshot_public()))
+            return self.__store.snapshot_public()
 
     def restore_from_snapshot(self, snapshot: Dict[str, Any], _bypass: bool = False) -> None:
         """
         Restore configuration from a snapshot dictionary.
+        Logs info on success.
         """
         if self.__torn_down:
             logger.error("Attempted restore_from_snapshot after teardown.")
@@ -263,6 +241,7 @@ class AppConfig:
             self.__store.restore(resolved_kwargs)
             self.__integrity.update_snapshot(self.__store.snapshot_internal())
             self.__hooks.run(self.__store.snapshot_internal())
+            logger.info(f"Config restored from snapshot: {list(resolved_kwargs.keys())}")
 
     def register_post_update_hook(self, func) -> None:
         """
@@ -286,6 +265,7 @@ class AppConfig:
                     kwargs, bypass=_bypass, context="temp_update"
                 )
                 self._apply_changes(resolved_kwargs, permanent=True, reason="temp_update")
+                logger.info(f"Temporary config update applied: {list(resolved_kwargs.keys())}")
                 yield
             except Exception as exc:
                 logger.error(f"Exception in temp_update context: {exc}")
@@ -295,6 +275,7 @@ class AppConfig:
                 self.__integrity.update_snapshot(prior_config)
                 if prior_checksum:
                     self.__integrity._last_checksum = prior_checksum
+                logger.info("Temporary config update reverted.")
 
     def verify_integrity(self) -> bool:
         """
