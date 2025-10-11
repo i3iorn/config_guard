@@ -1,9 +1,11 @@
-from src.config_guard import AppConfig
+from config_guard import AppConfig, register_param
 
-cfg = AppConfig()  # singleton; returns existing instance
+if __name__ == "__main__":
+    cfg = AppConfig()  # singleton; returns existing instance
+    register_param("verify", type=bool, default=True, description="Enable verification")
 
-# Set a one-time value
-cfg.use_once(reason="temp override", **{"verify": False})
+    # Set a one-time value
+    cfg.use_once(reason="temp override", **{"verify": False})
 
-print("First read (uses one-time):", cfg.get("verify"))
-print("Second read (falls back to permanent):", cfg.get("verify"))
+    print("First read (uses one-time):", cfg.get("verify"))
+    print("Second read (falls back to permanent):", cfg.get("verify"))

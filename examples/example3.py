@@ -1,8 +1,17 @@
 import os
-from src.config_guard import AppConfig
-from src.config_guard.exceptions import ConfigLockedError
+
+from config_guard import AppConfig, list_params, register_param
+from config_guard.exceptions import ConfigLockedError
 
 cfg = AppConfig()
+register_param(
+    "verify",
+    type=bool,
+    default=True,
+    description="Whether to verify SSL certificates",
+)
+
+print(list_params())
 
 cfg.lock()
 try:
