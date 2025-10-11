@@ -5,18 +5,20 @@ import json
 import os
 from copy import deepcopy
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Dict
+from typing import Any, Dict
 
-if TYPE_CHECKING:
-    from src.config_guard import ConfigParam
+from config_guard.params import ConfigParam
 
 
 def _immutable_copy(value: Any) -> Any:
-    if isinstance(value, list):
-        return tuple(deepcopy(value))
-    if isinstance(value, dict):
-        return MappingProxyType({k: deepcopy(v) for k, v in value.items()})
-    return deepcopy(value)
+    try:
+        if isinstance(value, list):
+            return tuple(deepcopy(value))
+        if isinstance(value, dict):
+            return MappingProxyType({k: deepcopy(v) for k, v in value.items()})
+        return deepcopy(value)
+    except Exception as e:
+        raise ValueError("Value is not deepcopy-able") from e
 
 
 def _stable_serialize_for_checksum(data: Dict[ConfigParam, Any]) -> bytes:
