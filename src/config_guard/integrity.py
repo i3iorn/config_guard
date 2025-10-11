@@ -39,7 +39,8 @@ class IntegrityGuard:
         key = os.getenv("CONFIG_HMAC_KEY", "")
         if not key:
             return checksum
-        return hmac.new(key.encode(), checksum.encode(), getattr(hashlib, self._algo)()).hexdigest()
+        # Use algorithm name directly as digestmod to satisfy hmac.new contract
+        return hmac.new(key.encode(), checksum.encode(), self._algo).hexdigest()
 
     def update_snapshot(self, snapshot: Dict[str, Any]) -> None:
         self._last_snapshot = {k: deepcopy(v) for k, v in snapshot.items()}

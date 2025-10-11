@@ -28,21 +28,17 @@ def test_integrity_init_invalid_algo():
 def test_integrity_seal_checksum(monkeypatch):
     ig = IntegrityGuard()
     ig.update_snapshot({"a": 1})
-    raw = ig.last_checksum
 
     # With no key, seal returns input
     monkeypatch.delenv("CONFIG_HMAC_KEY", raising=False)
     sealed1 = ig.seal_checksum("deadbeef")
     assert sealed1 == "deadbeef"
 
-    # With key set, current implementation passes a hash instance to hmac,
-    # which raises; treat this as the error path for the method.
+    # With key set, returns an HMAC and should differ from input
     monkeypatch.setenv("CONFIG_HMAC_KEY", "secret")
-    with pytest.raises(ValueError):
-        ig.seal_checksum("deadbeef")
-    # After setting key, sealing the current checksum should also raise
-    with pytest.raises(ValueError):
-        ig.seal_checksum(raw)
+    sealed2 = ig.seal_checksum("deadbeef")
+    assert isinstance(sealed2, str)
+    assert sealed2 != "deadbeef"
 
 
 def test_integrity_memory_fingerprint_is_stable_type():
