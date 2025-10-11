@@ -26,7 +26,13 @@ from config_guard.exceptions import (
 from config_guard.hooks import HookBus
 from config_guard.integrity import IntegrityGuard
 from config_guard.locks import LockGuard
-from config_guard.params import CONFIG_SPECS, ConfigParam
+from config_guard.params import (
+    get_all_specs,
+    get_param_spec,
+    list_params,
+    register_param,
+    resolve_param_name,
+)
 from config_guard.store import ConfigStore
 from config_guard.utils import _immutable_copy, _require_bypass_env
 from config_guard.validation import ConfigValidator
@@ -41,7 +47,10 @@ __all__ = [
     "ConfigLockedError",
     "ConfigBypassError",
     "ConfigTornDownError",
-    "ConfigParam",
+    "register_param",
+    "get_param_spec",
+    "list_params",
+    "resolve_param_name",
 ]
 
 
@@ -58,14 +67,21 @@ class AppConfig:
 
     _global_lock = threading.RLock()
 
-    def __init__(self, initial_values: Dict[str, Any] = None) -> None:
+    def __init__(
+        self,
+        initial_values: Dict[str, Any] = None,
+        schema: Optional[Dict[str, Any]] = None,
+        *,
+        allow_mutable_types: bool = False,
+        immutable: bool = False,
+    ) -> None:
         # internal lock for instance ops
         self.__lock = threading.RLock()
 
         # components
         self.__lock_guard = LockGuard()
-        self.__validator = ConfigValidator(CONFIG_SPECS)
-        self.__store = ConfigStore()
+        self.__validator = ConfigValidator()
+        self.__store = ConfigStore(allow_mutable_types)
         self.__integrity = IntegrityGuard(self.HASH_ALGORITHM)
         self.__hooks = HookBus()
 
@@ -80,14 +96,12 @@ class AppConfig:
 
         # init values
         bypass_startup = bool(initial_values.pop("_bypass", False))
-        for param, spec in CONFIG_SPECS.items():
-            val = _immutable_copy(initial_values.get(param.value, spec["default"]))
+        for param, spec in get_all_specs().items():
+            val = _immutable_copy(initial_values.get(param, spec["default"]))
             if bypass_startup:
                 if not _require_bypass_env():
                     raise ConfigBypassError("Startup bypass requires ALLOW_CONFIG_BYPASS=1")
-                warnings.warn(
-                    f"Startup bypass for {param.value}={val!r}", UserWarning, stacklevel=2
-                )
+                warnings.warn(f"Startup bypass for {param}={val!r}", UserWarning, stacklevel=2)
             else:
                 self.__validator.validate_value(param, val)
             self.__store.set(param, val, permanent=True)
@@ -98,6 +112,9 @@ class AppConfig:
             is_torn_down=lambda: self.__torn_down,
             on_violation=lambda msg: logger.critical(msg),
         )
+
+        if immutable:
+            self.lock()
 
     # forbid public attribute mutation
     def __setattr__(self, name, value):
@@ -142,7 +159,7 @@ class AppConfig:
                 return f"{module}:{frame.function}"
         return "unknown"
 
-    def _apply_changes(self, changes: Dict[ConfigParam, Any], *, permanent: bool, reason: str):
+    def _apply_changes(self, changes: Dict[str, Any], *, permanent: bool, reason: str):
         for param, val in changes.items():
             self.__store.set(param, val, permanent=permanent)
         self.__last_modified_by = self._caller_id()
@@ -153,16 +170,16 @@ class AppConfig:
 
     def _validate_and_resolve(
         self, input_dict: Dict[str, Any], *, bypass: bool = False, context: str = "update"
-    ) -> Dict[ConfigParam, Any]:
+    ) -> Dict[str, Any]:
         """
         Helper to resolve and validate input values for config updates.
-        Returns a dict of ConfigParam to immutable value, or raises ConfigValidationError.
+        Returns a dict of str to immutable value, or raises ConfigValidationError.
         Error messages include context and parameter name for clarity.
         """
         errors: Dict[str, str] = {}
-        resolved: Dict[ConfigParam, Any] = {}
+        resolved: Dict[str, Any] = {}
         for k, v in input_dict.items():
-            param = ConfigParam.resolve(k)
+            param = resolve_param_name(k)
             try:
                 if not bypass:
                     self.__validator.validate_value(param, v)
@@ -207,14 +224,14 @@ class AppConfig:
             self._apply_changes(resolved_kwargs, permanent=False, reason=reason)
             logger.info(f"Config temporarily updated: {list(resolved_kwargs.keys())}")
 
-    def get(self, key: Union[ConfigParam, str], default: Any = None) -> Any:
+    def get(self, key: Union[str, str], default: Any = None) -> Any:
         """
         Get the value of a configuration parameter.
         """
         if self.__torn_down:
             logger.error("Attempted get after teardown.")
             raise ConfigTornDownError("Config has been torn down")
-        key = ConfigParam.resolve(key)
+        key = resolve_param_name(key)
         with self.__lock:
             return self.__store.get(key, default)
 
