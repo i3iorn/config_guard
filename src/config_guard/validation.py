@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-from src.config_guard.exceptions import ConfigValidationError
-from src.config_guard.params import CONFIG_SPECS, ConfigParam
+from config_guard.exceptions import ConfigValidationError
+from config_guard.params import CONFIG_SPECS, ConfigParam
 
 
 class ConfigValidator:
@@ -23,24 +23,28 @@ class ConfigValidator:
             raise ConfigValidationError({key.value: "No spec defined."})
 
         errors: Dict[str, str] = {}
-        exp_type = spec.get("type")
-        if exp_type and not isinstance(value, exp_type):
-            errors[key.value] = f"Expected {exp_type}, got {type(value)}"
+        # Strict None check: if value is None and default is not None, always error
+        if value is None and spec.get("default") is not None:
+            errors[key.value] = "None is not a valid value for this parameter."
+        else:
+            exp_type = spec.get("type")
+            if exp_type and not isinstance(value, exp_type):
+                errors[key.value] = f"Expected {exp_type}, got {type(value)}"
 
-        bounds = spec.get("bounds")
-        if bounds and isinstance(value, (int, float)):
-            lo, hi = bounds
-            if not (lo <= value <= hi):
-                errors[key.value] = f"Value {value} out of bounds [{lo},{hi}]"
+            bounds = spec.get("bounds")
+            if bounds and isinstance(value, (int, float)):
+                lo, hi = bounds
+                if not (lo <= value <= hi):
+                    errors[key.value] = f"Value {value} out of bounds [{lo},{hi}]"
 
-        patt_re = spec.get("pattern")
-        if patt_re and isinstance(value, str):
-            if not re.match(patt_re, value):
-                errors[key.value] = f"Pattern mismatch {patt_re}"
+            patt_re = spec.get("pattern")
+            if patt_re and isinstance(value, str):
+                if not re.match(patt_re, value):
+                    errors[key.value] = f"Pattern mismatch {patt_re}"
 
-        cust = spec.get("validator")
-        if cust and not cust(value):
-            errors[key.value] = "Custom validator failed for "
+            cust = spec.get("validator")
+            if cust and not cust(value):
+                errors[key.value] = "Custom validator failed for "
 
         if errors:
             raise ConfigValidationError(errors, key, value)
