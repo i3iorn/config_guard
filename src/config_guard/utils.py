@@ -7,8 +7,6 @@ from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Dict
 
-from config_guard.params import ConfigParam
-
 
 def _immutable_copy(value: Any) -> Any:
     try:
@@ -21,19 +19,19 @@ def _immutable_copy(value: Any) -> Any:
         raise ValueError("Value is not deepcopy-able") from e
 
 
-def _stable_serialize_for_checksum(data: Dict[ConfigParam, Any]) -> bytes:
+def _stable_serialize_for_checksum(data: Dict[str, Any]) -> bytes:
     out: Dict[str, Any] = {}
-    for key in sorted(data.keys(), key=lambda k: k.value):
+    for key in sorted(data.keys(), key=lambda k: k):
         val = data[key]
         try:
             json.dumps(val)
-            out[key.value] = val
+            out[key] = val
         except Exception:
-            out[key.value] = repr(val)
+            out[key] = repr(val)
     return json.dumps(out, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
-def _checksum_of_config(snapshot: Dict[ConfigParam, Any], algorithm: str = "sha256") -> str:
+def _checksum_of_config(snapshot: Dict[str, Any], algorithm: str = "sha256") -> str:
     b = _stable_serialize_for_checksum(snapshot)
     return hashlib.new(algorithm, b).hexdigest()
 

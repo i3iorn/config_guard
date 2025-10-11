@@ -8,7 +8,6 @@ import threading
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional
 
-from config_guard.params import ConfigParam
 from config_guard.utils import _checksum_of_config
 
 
@@ -17,7 +16,7 @@ class IntegrityGuard:
         if not hasattr(hashlib, hash_algorithm):
             raise ValueError(f"Unknown hash algorithm: {hash_algorithm}")
         self._algo = hash_algorithm
-        self._last_snapshot: Optional[Dict[ConfigParam, Any]] = None
+        self._last_snapshot: Optional[Dict[str, Any]] = None
         self._last_checksum: Optional[str] = None
         self._checker_thread: Optional[threading.Thread] = None
 
@@ -26,12 +25,23 @@ class IntegrityGuard:
         return self._last_checksum
 
     def seal_checksum(self, checksum: str) -> str:
+        """
+        Optionally seal the checksum with HMAC using a key from the environment.
+        If no key is set, returns the checksum unchanged.
+        If a key is set, returns the HMAC of the checksum.
+        Raises if HMAC computation fails.
+
+        Raises:
+        - ValueError: If the HMAC computation fails due to an invalid algorithm.
+        - TypeError: If the key or checksum are of invalid types.
+        - Exception: For any other exceptions raised during HMAC computation.
+        """
         key = os.getenv("CONFIG_HMAC_KEY", "")
         if not key:
             return checksum
         return hmac.new(key.encode(), checksum.encode(), getattr(hashlib, self._algo)()).hexdigest()
 
-    def update_snapshot(self, snapshot: Dict[ConfigParam, Any]) -> None:
+    def update_snapshot(self, snapshot: Dict[str, Any]) -> None:
         self._last_snapshot = {k: deepcopy(v) for k, v in snapshot.items()}
         raw = _checksum_of_config(self._last_snapshot, self._algo)
         self._last_checksum = self.seal_checksum(raw)
