@@ -1,8 +1,7 @@
 # python
 import logging
 
-from config_guard import AppConfig
-from config_guard.params import get_param_spec, register_param, resolve_param_name
+from config_guard import AppConfig, get_param_spec, register_param, resolve_param_name
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)

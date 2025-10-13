@@ -1,5 +1,4 @@
-from config_guard import AppConfig, register_param
-from config_guard.exceptions import ConfigValidationError
+from config_guard import AppConfig, ConfigValidationError, register_param
 
 if __name__ == "__main__":
     cfg = AppConfig()

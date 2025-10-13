@@ -1,7 +1,6 @@
 import os
 
-from config_guard import AppConfig, list_params, register_param
-from config_guard.exceptions import ConfigLockedError
+from config_guard import AppConfig, ConfigLockedError, list_params, register_param
 
 cfg = AppConfig()
 register_param(
