@@ -8,7 +8,7 @@ import threading
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional
 
-from config_guard.utils import _checksum_of_config
+from .utils import _checksum_of_config
 
 
 class IntegrityGuard:
