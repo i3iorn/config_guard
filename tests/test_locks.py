@@ -52,3 +52,11 @@ def test_lockguard_ensure_unlocked_bypass_without_env_raises(monkeypatch):
     monkeypatch.delenv("ALLOW_CONFIG_BYPASS", raising=False)
     with pytest.raises(ConfigBypassError):
         lg.ensure_unlocked(_bypass=True)
+
+
+def test_lockable_double_lock_unlock():
+    lg = LockGuard()
+    lg.lock()
+    lg.lock()  # should not raise
+    lg.unlock()
+    lg.unlock()  # should not raise

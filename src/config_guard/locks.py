@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import warnings
 
-from config_guard.exceptions import ConfigBypassError, ConfigLockedError
-from config_guard.utils import _require_bypass_env
+from .exceptions import ConfigBypassError, ConfigLockedError
+from .utils import _require_bypass_env
 
 
 class LockGuard:
