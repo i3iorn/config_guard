@@ -9,7 +9,10 @@ class ConfigError(Exception):
 
 class ConfigValidationError(ConfigError):
     """Raised when validation fails for one or more parameters."""
-    def __init__(self, errors: Dict[str, str], key: str | None = None, value: object | None = None) -> None:
+
+    def __init__(
+        self, errors: Dict[str, str], key: str | None = None, value: object | None = None
+    ) -> None:
         self.errors = errors
         self.key = key
         self.value = value
@@ -29,3 +32,11 @@ class ConfigBypassError(ConfigError):
 
 class ConfigTornDownError(ConfigError):
     """Raised if operations are attempted after teardown."""
+
+
+class ConfigNotFoundError(ConfigError):
+    """Raised when a requested configuration parameter is not found."""
+
+
+class ConfigDuplicateError(ConfigError):
+    """Raised when attempting to register a duplicate configuration parameter."""
