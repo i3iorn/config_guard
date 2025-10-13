@@ -6,16 +6,18 @@ from typing import Any, Callable, Dict, List, Literal
 logger = logging.getLogger("app_config_secure")
 logger.addHandler(logging.NullHandler())
 
+Hook = Callable[[Dict[str, Any]], None]
+
 
 class HookBus:
     def __init__(self, failure_mode: Literal["ignore", "log", "raise"] = "ignore") -> None:
-        self._hooks: List[Callable[[Dict[str, Any]], None]] = []
+        self._hooks: List[Hook] = []
 
         if failure_mode not in ("ignore", "log", "raise"):
             raise ValueError("failure_mode must be one of 'ignore', 'log', 'raise'")
         self._failure_mode = failure_mode
 
-    def register(self, func: Callable[[Dict[str, Any]], None]) -> None:
+    def register(self, func: Hook) -> None:
         if not callable(func):
             raise TypeError("Hook must be callable")
         self._hooks.append(func)
