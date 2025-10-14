@@ -3,18 +3,22 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from types import MappingProxyType
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Tuple
 
 from config_guard.params import get_param_spec, resolve_param_name
+from config_guard.params.spec import ParamSpec
 from config_guard.store.adaptors import PersistanceAdapterProtocol
 from config_guard.utils import _immutable_copy
 
 logger = logging.getLogger("config_guard.store")
+logger.addHandler(logging.NullHandler())
 
 
 class ConfigStore:
     def __init__(
-        self, mutable_types: bool = False, persistance_adapter: PersistanceAdapterProtocol = None
+        self,
+        mutable_types: bool = False,
+        persistance_adapter: Optional[PersistanceAdapterProtocol] = None,
     ) -> None:
         self._config: Dict[str, Any] = {}
         self._use_once: Dict[str, Any] = {}
@@ -42,32 +46,31 @@ class ConfigStore:
 
     def _check_type(self, key: str, value: Any) -> None:
         if key in self._config and not self._mutable_types:
-            existing_type = type(self._config[key])
+            existing_type_obj = type(self._config[key])
             param_spec = get_param_spec(key)
             new_type = type(value)
 
-            if not isinstance(existing_type, tuple):
-                existing_type = (existing_type,)
+            existing_types: Tuple[type, ...] = (existing_type_obj,)
 
-            if not isinstance(param_spec.type, tuple):
-                param_spec_type = (param_spec.type,)
+            if isinstance(param_spec.type, tuple):
+                param_spec_types: Tuple[type, ...] = param_spec.type
             else:
-                param_spec_type = param_spec.type
+                param_spec_types = (param_spec.type,)
 
-            allowed_types = param_spec_type + existing_type
+            allowed_types: Tuple[type, ...] = param_spec_types + existing_types
 
             if new_type not in allowed_types:
                 logger.error(
                     "Attempted to change type of config key '%s' from %s to %s",
                     key,
-                    existing_type,
+                    existing_types,
                     new_type,
                 )
                 raise ValueError(
-                    f"Cannot change type of config key '{key}' from {existing_type} to {new_type}"
+                    f"Cannot change type of config key '{key}' from {existing_types} to {new_type}"
                 )
 
-    def _check_bounds(self, param_spec, value):
+    def _check_bounds(self, param_spec: ParamSpec, value: Any) -> None:
         if param_spec is None or param_spec.bounds is None:
             return
         lo, hi = param_spec.bounds
@@ -83,7 +86,7 @@ class ConfigStore:
                 f"Value {value} for config key '{param_spec.name}' out of bounds [{lo}, {hi}]"
             )
 
-    def get(self, key: Union[str, str], default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         key = resolve_param_name(key)
 
         if key in self._use_once:
@@ -121,7 +124,7 @@ class ConfigStore:
     def snapshot_internal(self) -> Dict[str, Any]:
         return {k: deepcopy(v) for k, v in self._config.items()}
 
-    def snapshot_public(self) -> MappingProxyType:
+    def snapshot_public(self) -> MappingProxyType[str, Any]:
         return MappingProxyType({k: deepcopy(v) for k, v in self._config.items()})
 
     def restore(self, values: Dict[str, Any]) -> None:

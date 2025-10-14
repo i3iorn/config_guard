@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from config_guard.exceptions import ConfigValidationError
 
@@ -33,6 +33,7 @@ class ParamSpec:
             ) from e
 
         if not self._bounds_check(value):
+            assert self.bounds is not None
             lo, hi = self.bounds
             raise ConfigValidationError({self.name: f"Value {value} out of bounds [{lo}, {hi}]."})
 
@@ -48,6 +49,7 @@ class ParamSpec:
 
     def _bounds_check(self, value: Any) -> bool:
         if self.has_bounds():
+            assert self.bounds is not None
             lo, hi = self.bounds
             if isinstance(value, (str, list, tuple, dict)):
                 return lo <= len(value) <= hi
@@ -58,8 +60,8 @@ class ParamSpec:
     def has_bounds(self) -> bool:
         return self.bounds is not None
 
-    def to_mapping(self) -> dict:
-        d = {"default": self.default, "type": self.type}
+    def to_mapping(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"default": self.default, "type": self.type}
         if self.validator is not None:
             d["validator"] = self.validator
         if self.bounds is not None:
@@ -68,5 +70,5 @@ class ParamSpec:
             d["description"] = self.description
         return d
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> Any:
         return self.to_mapping()[item]

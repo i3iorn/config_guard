@@ -36,11 +36,11 @@ def _recursive_immutable_copy(value: Any) -> Any:
 def _stable_serialize_for_checksum(data: Dict[str, Any]) -> bytes:
     out: Dict[str, Any] = {}
 
-    def safe_key_func(k):
+    def safe_key_func(k: object) -> str:
         return repr(k)
 
     for og_key in sorted(data.keys(), key=safe_key_func):
-        safe_key = safe_key_func(og_key)
+        safe_key: str = safe_key_func(og_key)
         val = data[og_key]
         try:
             json.dumps(val)

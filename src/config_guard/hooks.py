@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Literal
 
-logger = logging.getLogger("app_config_secure")
+logger = logging.getLogger("config_guard.hooks")
 logger.addHandler(logging.NullHandler())
 
 Hook = Callable[[Dict[str, Any]], None]
@@ -30,10 +30,10 @@ class HookBus:
                 if self._failure_mode == "raise":
                     raise
                 elif self._failure_mode == "log":
-                    logger.error(f"Hook {hook} failed: {exc}")
+                    logger.error("Hook %r failed: %s", hook, exc)
                 else:
                     # If set to ignore we still log at debug level
-                    logger.debug(f"Hook {hook} failed but ignored: {exc}")
+                    logger.debug("Hook %r failed but ignored: %s", hook, exc)
 
     def clear(self) -> None:
         self._hooks.clear()

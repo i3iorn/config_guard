@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import threading
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional
 
 from .utils import _checksum_of_config
+
+logger = logging.getLogger("config_guard.integrity")
+logger.addHandler(logging.NullHandler())
 
 
 class IntegrityGuard:
@@ -19,6 +23,7 @@ class IntegrityGuard:
         self._last_snapshot: Optional[Dict[str, Any]] = None
         self._last_checksum: Optional[str] = None
         self._checker_thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event = threading.Event()
 
     @property
     def last_checksum(self) -> Optional[str]:
@@ -57,16 +62,34 @@ class IntegrityGuard:
     def start_checker(
         self, *, is_torn_down: Callable[[], bool], on_violation: Callable[[str], None]
     ) -> None:
-        def _loop():
+        # reset stop event when starting
+        self._stop_event.clear()
+
+        def _loop() -> None:
             evt = threading.Event()
-            while not is_torn_down():
+            while not is_torn_down() and not self._stop_event.is_set():
                 if not self.verify():
                     on_violation("AppConfig integrity violation detected")
+                # short waits let stop react quickly without busy looping
                 evt.wait(10)
+            logger.debug(
+                "Integrity checker loop exiting. torn_down=%s stop=%s",
+                is_torn_down(),
+                self._stop_event.is_set(),
+            )
 
         t = threading.Thread(target=_loop, daemon=True)
         t.start()
         self._checker_thread = t
+        logger.debug("Integrity checker thread started (daemon).")
+
+    def stop(self) -> None:
+        """Signal the background checker to stop and join the thread."""
+        self._stop_event.set()
+        if self._checker_thread and self._checker_thread.is_alive():
+            self._checker_thread.join()
+            logger.debug("Integrity checker thread stopped.")
+        self._checker_thread = None
 
     def memory_fingerprint(self) -> str:
         data = {
@@ -80,5 +103,7 @@ class IntegrityGuard:
             self._checker_thread.join()
 
     def clear(self) -> None:
+        # Ensure background thread is stopped before clearing state
+        self.stop()
         self._last_snapshot = None
         self._last_checksum = None
