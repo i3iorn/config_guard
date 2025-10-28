@@ -71,14 +71,11 @@ class AppConfig:
 
         # lifecycle/meta
         self.__torn_down = False
-        self.__last_modified_by: Optional[str] = None
-        self.__last_modified_at: Optional[datetime.datetime] = None
-        self.__last_change_reason: Optional[str] = None
-        self.__last_modified_parameters: Optional[list[str]] = None
 
         # components
         self.__lock_guard = LockGuard()
         self.__validator = ConfigValidator()
+
         # history for audit trail
         self.__history = History(max_entries=1000)
         self.__store = ConfigStore(allow_mutable_types, history=self.__history)
@@ -148,37 +145,55 @@ class AppConfig:
 
     @property
     def last_modified_by(self) -> Optional[str]:
-        """Return the identifier of the last caller that modified the config, if any."""
-        return self.__last_modified_by
+        """Return the identifier of the last caller that modified the config, if any.
+        Delegated to History."""
+        return (
+            getattr(self, "__history", None).last_modified_by
+            if hasattr(self, "__history")
+            else None
+        )
 
     @property
     def last_modified_at(self) -> Optional[datetime.datetime]:
-        """Return the timestamp of the last modification in UTC, if any."""
-        return self.__last_modified_at
+        """Return the timestamp of the last modification in UTC, if any. Delegated to History."""
+        return (
+            getattr(self, "__history", None).last_modified_at
+            if hasattr(self, "__history")
+            else None
+        )
 
     @property
     def last_change_reason(self) -> Optional[str]:
-        """Return the reason associated with the last modification, if any."""
-        return self.__last_change_reason
+        """Return the reason associated with the last modification, if any. Delegated to History."""
+        return (
+            getattr(self, "__history", None).last_change_reason
+            if hasattr(self, "__history")
+            else None
+        )
 
     @property
     def last_modified_parameters(self) -> Optional[list[str]]:
-        """Return the list of parameters modified in the last change, if any."""
-        return self.__last_modified_parameters
+        """Return the list of parameters modified in the last change, if any. Delegated to History."""
+        return (
+            getattr(self, "__history", None).last_modified_parameters
+            if hasattr(self, "__history")
+            else None
+        )
 
     @property
     def last_change(self) -> Dict[str, str]:
-        """Return a summary of the last change made to the configuration."""
-        return {
-            "modified_by": self.__last_modified_by or "",
-            "modified_at": self.__last_modified_at.isoformat() if self.__last_modified_at else "",
-            "change_reason": self.__last_change_reason or "",
-            "modified_parameters": (
-                ", ".join(self.__last_modified_parameters)
-                if self.__last_modified_parameters
-                else ""
-            ),
-        }
+        """Return a summary of the last change made to the configuration. Delegated to History."""
+        hist = getattr(self, "__history", None)
+        return (
+            hist.last_change
+            if hist is not None
+            else {
+                "modified_by": "",
+                "modified_at": "",
+                "change_reason": "",
+                "modified_parameters": "",
+            }
+        )
 
     @property
     def history(self):
@@ -187,9 +202,10 @@ class AppConfig:
 
     def get_history(self):
         """Return a list of history entries (copy)."""
-        if hasattr(self, "__history") and self.__history is not None:
-            return self.__history.all_entries()
-        return []
+        hist = getattr(self, "__history", None)
+        if hist is None:
+            return []
+        return hist.all_entries()
 
     # forbid public attribute mutation
     def __setattr__(self, name: str, value: Any) -> None:
@@ -260,15 +276,15 @@ class AppConfig:
             self.__store.set(
                 param, val, permanent=permanent, reason=reason, modified_by=modified_by
             )
-        self.__last_modified_parameters = list(changes.keys())
-        self.__last_modified_by = modified_by
-        self.__last_modified_at = datetime.datetime.now(tz=datetime.timezone.utc)
-        self.__last_change_reason = reason
+        # History will maintain last-change metadata itself; store.add_entry is handled by ConfigStore
         after = self.__store.snapshot_internal()
         try:
             # also add a consolidated history entry for this multi-key change
-            if hasattr(self, "__history") and self.__history is not None:
-                self.__history.add_entry(
+            # If a History adaptor is present the store/other components will call add_entry;
+            # otherwise, best-effort: call it here to ensure a consolidated entry exists.
+            hist = getattr(self, "__history", None)
+            if hist is not None:
+                hist.add_entry(
                     modified_by=modified_by,
                     keys=list(changes.keys()),
                     reason=reason,
@@ -440,9 +456,10 @@ class AppConfig:
                 # Best-effort stop; proceed to clear
                 pass
             self.__integrity.clear()
-            self.__last_modified_by = None
-            self.__last_modified_at = None
-            self.__last_change_reason = None
+            # clear history metadata via History
+            hist = getattr(self, "__history", None)
+            if hist is not None:
+                hist.clear()
             logger.info("AppConfig torn down.")
 
     def __repr__(self) -> str:

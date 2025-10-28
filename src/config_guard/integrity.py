@@ -66,12 +66,12 @@ class IntegrityGuard:
         self._stop_event.clear()
 
         def _loop() -> None:
-            evt = threading.Event()
+            # Run until torn down or stop requested; wait on the stop event with a short timeout
             while not is_torn_down() and not self._stop_event.is_set():
                 if not self.verify():
                     on_violation("AppConfig integrity violation detected")
-                # short waits let stop react quickly without busy looping
-                evt.wait(10)
+                # Wait on the shared stop event with a short timeout so stop() can interrupt promptly
+                self._stop_event.wait(0.1)
             logger.debug(
                 "Integrity checker loop exiting. torn_down=%s stop=%s",
                 is_torn_down(),
