@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Type, TypeVar, cast
 
 from config_guard.exceptions import ConfigBypassError, ConfigTornDownError, ConfigValidationError
 
+from .history import History
 from .hooks import Hook, HookBus
 from .integrity import IntegrityGuard
 from .locks import LockGuard
@@ -78,7 +79,9 @@ class AppConfig:
         # components
         self.__lock_guard = LockGuard()
         self.__validator = ConfigValidator()
-        self.__store = ConfigStore(allow_mutable_types)
+        # history for audit trail
+        self.__history = History(max_entries=1000)
+        self.__store = ConfigStore(allow_mutable_types, history=self.__history)
         self.__integrity = IntegrityGuard(self.HASH_ALGORITHM)
         self.__hooks = HookBus()
 
@@ -177,6 +180,17 @@ class AppConfig:
             ),
         }
 
+    @property
+    def history(self):
+        """Return the History object used by this AppConfig (read-only)."""
+        return getattr(self, "__history", None)
+
+    def get_history(self):
+        """Return a list of history entries (copy)."""
+        if hasattr(self, "__history") and self.__history is not None:
+            return self.__history.all_entries()
+        return []
+
     # forbid public attribute mutation
     def __setattr__(self, name: str, value: Any) -> None:
         """
@@ -238,14 +252,33 @@ class AppConfig:
             del frame
 
     def _apply_changes(self, changes: Dict[str, Any], *, permanent: bool, reason: str) -> None:
+        # record before/after snapshot for the full change
+        before = self.__store.snapshot_internal()
+        modified_by = self._caller_id()
         for param, val in changes.items():
-            self.__store.set(param, val, permanent=permanent, reason=reason)
+            # pass modified_by so history entries are accurate
+            self.__store.set(
+                param, val, permanent=permanent, reason=reason, modified_by=modified_by
+            )
         self.__last_modified_parameters = list(changes.keys())
-        self.__last_modified_by = self._caller_id()
+        self.__last_modified_by = modified_by
         self.__last_modified_at = datetime.datetime.now(tz=datetime.timezone.utc)
         self.__last_change_reason = reason
-        self.__integrity.update_snapshot(self.__store.snapshot_internal())
-        self.__hooks.run(self.__store.snapshot_internal())
+        after = self.__store.snapshot_internal()
+        try:
+            # also add a consolidated history entry for this multi-key change
+            if hasattr(self, "__history") and self.__history is not None:
+                self.__history.add_entry(
+                    modified_by=modified_by,
+                    keys=list(changes.keys()),
+                    reason=reason,
+                    before=before,
+                    after=after,
+                )
+        except Exception:
+            pass
+        self.__integrity.update_snapshot(after)
+        self.__hooks.run(after)
 
     def _validate_and_resolve(
         self, input_dict: Dict[str, Any], *, bypass: bool = False, context: str = "update"
@@ -335,7 +368,9 @@ class AppConfig:
             resolved_kwargs = self._validate_and_resolve(
                 snapshot, bypass=_bypass, context="restore_from_snapshot"
             )
-            self.__store.restore(resolved_kwargs)
+            self.__store.restore(
+                resolved_kwargs, modified_by=self._caller_id(), reason="restore_from_snapshot"
+            )
             self.__integrity.update_snapshot(self.__store.snapshot_internal())
             self.__hooks.run(self.__store.snapshot_internal())
             logger.info("Config restored from snapshot keys=%s", list(resolved_kwargs.keys()))
@@ -367,7 +402,9 @@ class AppConfig:
                 logger.error("Exception in temp_update context: %s", exc)
                 raise
             finally:
-                self.__store.restore(prior_config)
+                self.__store.restore(
+                    prior_config, modified_by=self._caller_id(), reason="temp_update_revert"
+                )
                 self.__integrity.update_snapshot(prior_config)
                 if prior_checksum:
                     self.__integrity._last_checksum = prior_checksum
@@ -394,7 +431,7 @@ class AppConfig:
         """
         with self.__lock:
             self.__torn_down = True
-            self.__store.clear()
+            self.__store.clear(modified_by=self._caller_id())
             self.__hooks.clear()
             # Explicitly stop integrity thread before clearing state
             try:

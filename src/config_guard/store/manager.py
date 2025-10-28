@@ -5,6 +5,7 @@ from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Dict, Optional, Tuple
 
+from config_guard.history import History
 from config_guard.params import get_param_spec, resolve_and_get, resolve_param_name
 from config_guard.params.spec import ParamSpec
 from config_guard.store.adaptors import PersistanceAdapterProtocol
@@ -19,11 +20,13 @@ class ConfigStore:
         self,
         mutable_types: bool = False,
         persistance_adapter: Optional[PersistanceAdapterProtocol] = None,
+        history: Optional[History] = None,
     ) -> None:
         self._config: Dict[str, Any] = {}
         self._use_once: Dict[str, Any] = {}
         self._mutable_types = mutable_types
         self._persistance_adapter = persistance_adapter
+        self._history = history
         if self._persistance_adapter is not None:
             self.load()
 
@@ -32,7 +35,15 @@ class ConfigStore:
     def allows_mutable_types(self) -> bool:
         return self._mutable_types
 
-    def set(self, key: str, value: Any, *, permanent: bool, reason: str = "") -> None:
+    def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        permanent: bool,
+        reason: str = "",
+        modified_by: str = "unknown",
+    ) -> None:
         # Resolve and fetch ParamSpec in one call to avoid double lookups
         name, param_spec = resolve_and_get(key)
         if param_spec.require_reason and not reason:
@@ -41,11 +52,28 @@ class ConfigStore:
         tgt = self._config if permanent else self._use_once
         imm_value = _immutable_copy(value)
 
+        before_snapshot = {name: self._config.get(name)}
+
         self._check_type(name, imm_value, param_spec)
+
         self._check_bounds(param_spec, imm_value)
         param_spec.validate(imm_value)
 
         tgt[name] = imm_value
+
+        # Record history if available
+        try:
+            if self._history is not None:
+                self._history.add_entry(
+                    modified_by=modified_by,
+                    keys=[name],
+                    reason=reason,
+                    before=before_snapshot,
+                    after={name: imm_value},
+                )
+        except Exception:
+            # history is best-effort
+            pass
 
     def _check_type(self, key: str, value: Any, param_spec: ParamSpec | None = None) -> None:
         if key in self._config and not self._mutable_types:
@@ -131,10 +159,36 @@ class ConfigStore:
     def snapshot_public(self) -> MappingProxyType[str, Any]:
         return MappingProxyType({k: deepcopy(v) for k, v in self._config.items()})
 
-    def restore(self, values: Dict[str, Any]) -> None:
+    def restore(
+        self, values: Dict[str, Any], *, modified_by: str = "unknown", reason: str = "restore"
+    ) -> None:
+        before = dict(self._config)
         self._config = {k: _immutable_copy(v) for k, v in values.items()}
         self._use_once.clear()
+        try:
+            if self._history is not None:
+                self._history.add_entry(
+                    modified_by=modified_by,
+                    keys=list(values.keys()),
+                    reason=reason,
+                    before=before,
+                    after=dict(self._config),
+                )
+        except Exception:
+            pass
 
-    def clear(self) -> None:
+    def clear(self, *, modified_by: str = "unknown") -> None:
+        before = dict(self._config)
         self._config.clear()
         self._use_once.clear()
+        try:
+            if self._history is not None:
+                self._history.add_entry(
+                    modified_by=modified_by,
+                    keys=[],
+                    reason="clear",
+                    before=before,
+                    after={},
+                )
+        except Exception:
+            pass

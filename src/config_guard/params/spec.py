@@ -14,8 +14,8 @@ class ParamSpec:
     validator: Optional[Callable[[Any], bool]] = None
     bounds: Optional[Tuple[Union[int, float], Union[int, float]]] = None
     description: Optional[str] = None
-    allow_none: bool = True
     require_reason: bool = False
+    allow_none: bool = True
 
     def validate(self, value: Any) -> None:
         if value is None:
@@ -72,6 +72,8 @@ class ParamSpec:
             d["bounds"] = self.bounds
         if self.description:
             d["description"] = self.description
+        if self.require_reason:
+            d["require_reason"] = True
         return d
 
     def __getitem__(self, item: str) -> Any:
