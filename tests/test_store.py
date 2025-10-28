@@ -13,7 +13,7 @@ def test_configstore_set_get_and_use_once_with_immutable_copy():
     register_param(
         "FRUIT_LIST",
         default=["apple", "banana"],
-        type=tuple,
+        value_type=tuple,
         description="A list of fruits",
     )
     key = resolve_param_name("FRUIT_LIST")
@@ -104,13 +104,13 @@ def test_configstore_load_save_with_adapter():
     register_param(
         "KEY1",
         default="default1",
-        type=str,
+        value_type=str,
         description="A test key 1",
     )
     register_param(
         "KEY2",
         default=0,
-        type=int,
+        value_type=int,
         description="A test key 2",
     )
 
@@ -160,7 +160,7 @@ def test_configstore_adapter_load_returns_non_dict_raises():
             pass
 
         def load(self) -> dict:
-            return "not a dict"  # Incorrect return type
+            return "not a dict"  # Incorrect return value_type
 
     adapter = BadAdapter()
     with pytest.raises(ValueError):
@@ -206,7 +206,7 @@ def test_configstore_set_with_invalid_type():
     register_param(
         "TEST_PARAM",
         default=10,
-        type=int,
+        value_type=int,
         description="A test parameter",
     )
     store = ConfigStore()
@@ -223,7 +223,7 @@ def test_configstore_set_with_validator():
     register_param(
         "POSITIVE_PARAM",
         default=1,
-        type=int,
+        value_type=int,
         validator=positive_validator,
         description="A positive integer parameter",
     )
@@ -237,7 +237,7 @@ def test_configstore_set_with_bounds():
     register_param(
         "BOUNDED_PARAM",
         default=5,
-        type=int,
+        value_type=int,
         bounds=(1, 10),
         description="An integer parameter with bounds",
     )
@@ -261,12 +261,12 @@ def test_configstore_set_with_invalid_value_type():
     register_param(
         "LIST_PARAM",
         default=[1, 2, 3],
-        type=tuple,
+        value_type=tuple,
         description="A list parameter",
     )
     store = ConfigStore()
     with pytest.raises(ConfigValidationError):
-        store.set("LIST_PARAM", "not a list", permanent=True)  # Invalid type
+        store.set("LIST_PARAM", "not a list", permanent=True)  # Invalid value_type
 
 
 def test_configstore_allows_mutable_types():
@@ -283,7 +283,7 @@ def test_configstore_set_with_none_value():
     register_param(
         "OPTIONAL_PARAM",
         default=None,
-        type=int,
+        value_type=int,
         description="An optional integer parameter",
     )
     store = ConfigStore()

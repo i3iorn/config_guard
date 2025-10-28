@@ -15,7 +15,7 @@ from config_guard.exceptions import ConfigBypassError, ConfigTornDownError, Conf
 from .hooks import Hook, HookBus
 from .integrity import IntegrityGuard
 from .locks import LockGuard
-from .params import get_all_specs, get_param_spec, register_param, resolve_param_name
+from .params import get_all_specs, register_param, resolve_and_get, resolve_param_name
 from .store.manager import ConfigStore
 from .utils import _immutable_copy, _require_bypass_env
 from .validation.base import ConfigValidator
@@ -73,6 +73,7 @@ class AppConfig:
         self.__last_modified_by: Optional[str] = None
         self.__last_modified_at: Optional[datetime.datetime] = None
         self.__last_change_reason: Optional[str] = None
+        self.__last_modified_parameters: Optional[list[str]] = None
 
         # components
         self.__lock_guard = LockGuard()
@@ -107,8 +108,10 @@ class AppConfig:
                     stacklevel=2,
                 )
             else:
-                self.__validator.validate_value(param, val)
-            self.__store.set(param, val, permanent=True)
+                # validate_value now returns canonical name which avoids re-resolve
+                canon = self.__validator.validate_value(param, val)
+                # use canonical name when setting to avoid resolve in store.set
+                self.__store.set(canon or param, val, permanent=True, reason="initialization")
 
         # initial snapshot + checker
         self.__integrity.update_snapshot(self.__store.snapshot_internal())
@@ -154,6 +157,25 @@ class AppConfig:
     def last_change_reason(self) -> Optional[str]:
         """Return the reason associated with the last modification, if any."""
         return self.__last_change_reason
+
+    @property
+    def last_modified_parameters(self) -> Optional[list[str]]:
+        """Return the list of parameters modified in the last change, if any."""
+        return self.__last_modified_parameters
+
+    @property
+    def last_change(self) -> Dict[str, str]:
+        """Return a summary of the last change made to the configuration."""
+        return {
+            "modified_by": self.__last_modified_by or "",
+            "modified_at": self.__last_modified_at.isoformat() if self.__last_modified_at else "",
+            "change_reason": self.__last_change_reason or "",
+            "modified_parameters": (
+                ", ".join(self.__last_modified_parameters)
+                if self.__last_modified_parameters
+                else ""
+            ),
+        }
 
     # forbid public attribute mutation
     def __setattr__(self, name: str, value: Any) -> None:
@@ -217,7 +239,8 @@ class AppConfig:
 
     def _apply_changes(self, changes: Dict[str, Any], *, permanent: bool, reason: str) -> None:
         for param, val in changes.items():
-            self.__store.set(param, val, permanent=permanent)
+            self.__store.set(param, val, permanent=permanent, reason=reason)
+        self.__last_modified_parameters = list(changes.keys())
         self.__last_modified_by = self._caller_id()
         self.__last_modified_at = datetime.datetime.now(tz=datetime.timezone.utc)
         self.__last_change_reason = reason
@@ -233,11 +256,14 @@ class AppConfig:
         errors: Dict[str, str] = {}
         resolved: Dict[str, Any] = {}
         for k, v in input_dict.items():
-            param = resolve_param_name(k)
             try:
+                # resolve + get spec in one call when validating
+                canon = None
                 if not bypass:
-                    self.__validator.validate_value(param, v)
-                resolved[param] = _immutable_copy(v)
+                    canon = self.__validator.validate_value(k, v)
+                if canon is None:
+                    canon = resolve_param_name(k)
+                resolved[canon] = _immutable_copy(v)
             except ConfigValidationError as exc:
                 for err_key, err_msg in exc.errors.items():
                     errors[err_key] = f"[{context}] {err_msg}"
@@ -282,13 +308,12 @@ class AppConfig:
         """
         Get the value of a configuration parameter.
         """
-        key = resolve_param_name(key)
-        param = get_param_spec(key)
-
+        # Resolve and obtain spec, using resolve_and_get to avoid duplicate work
+        name, param = resolve_and_get(key)
         default = _immutable_copy(param.default) if default is None else default
 
         with self.__lock:
-            return self.__store.get(key, default)
+            return self.__store.get(name, default)
 
     @is_torn_down
     def snapshot(self) -> MappingProxyType[str, Any]:
@@ -452,8 +477,7 @@ class AppConfig:
         """
         Remove a parameter from the configuration by resetting to default.
         """
-        param = resolve_param_name(key)
-        spec = get_param_spec(param)
+        param, spec = resolve_and_get(key)
         if spec is None:
             raise KeyError(f"Parameter {key} not registered")
         self.update(**{param: spec["default"]})

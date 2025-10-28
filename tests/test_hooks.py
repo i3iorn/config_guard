@@ -20,12 +20,12 @@ def test_hookbus_register_and_run_success(caplog):
 def test_hookbus_register_non_callable_raises():
     bus = HookBus()
     with pytest.raises(TypeError):
-        bus.register(123)  # type: ignore[arg-type]
+        bus.register(123)  # value_type: ignore[arg-value_type]
 
 
 def test_hookbus_invalid_failure_mode():
     with pytest.raises(ValueError):
-        HookBus("boom")  # type: ignore[arg-type]
+        HookBus("boom")  # value_type: ignore[arg-value_type]
 
 
 def test_hookbus_run_failure_modes(caplog):

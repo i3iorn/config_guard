@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
 from config_guard.exceptions import ConfigValidationError
 
@@ -10,11 +10,12 @@ from config_guard.exceptions import ConfigValidationError
 class ParamSpec:
     name: str
     default: Any
-    type: Union[type, Tuple[type, ...]]
+    value_type: Union[Type, Tuple[Type, ...]]
     validator: Optional[Callable[[Any], bool]] = None
     bounds: Optional[Tuple[Union[int, float], Union[int, float]]] = None
     description: Optional[str] = None
     allow_none: bool = True
+    require_reason: bool = False
 
     def validate(self, value: Any) -> None:
         if value is None:
@@ -23,13 +24,13 @@ class ParamSpec:
             return
 
         try:
-            if not isinstance(value, self.type):
+            if not isinstance(value, self.value_type):
                 raise ConfigValidationError(
-                    {self.name: f"Expected type {self.type}, got {type(value)}."}
+                    {self.name: f"Expected value_type {self.value_type}, got {type(value)}."}
                 )
         except TypeError as e:
             raise ConfigValidationError(
-                {self.name: f"Invalid type specification {self.type}."}
+                {self.name: f"Invalid value_type specification {self.value_type}."}
             ) from e
 
         if not self._bounds_check(value):
@@ -47,6 +48,9 @@ class ParamSpec:
                     {self.name: f"Custom validator raised exception: {e}"}
                 ) from e
 
+        if not isinstance(self.require_reason, bool):
+            raise ConfigValidationError({self.name: "require_reason must be a boolean value."})
+
     def _bounds_check(self, value: Any) -> bool:
         if self.has_bounds():
             assert self.bounds is not None
@@ -61,7 +65,7 @@ class ParamSpec:
         return self.bounds is not None
 
     def to_mapping(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"default": self.default, "type": self.type}
+        d: Dict[str, Any] = {"default": self.default, "value_type": self.value_type}
         if self.validator is not None:
             d["validator"] = self.validator
         if self.bounds is not None:

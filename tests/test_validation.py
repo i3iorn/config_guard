@@ -13,15 +13,15 @@ def test_validator_validate_value_success_and_failures():
     # success
     v.validate_value("MAX_CONCURRENCY", 5)
 
-    # key type wrong
+    # key value_type wrong
     with pytest.raises(ConfigValidationError):
-        v.validate_value(123, 5)  # type: ignore[arg-type]
+        v.validate_value(123, 5)  # value_type: ignore[arg-value_type]
 
     # unknown parameter
     with pytest.raises(ConfigNotFoundError):
         v.validate_value("UNKNOWN", 1)
 
-    # wrong type
+    # wrong value_type
     with pytest.raises(ConfigValidationError):
         v.validate_value("VERIFY", 1)
 
@@ -51,7 +51,7 @@ def test_validator_protocol():
         sample_validator(-5)
 
     with pytest.raises(ConfigValidationError):
-        sample_validator("string")  # type: ignore[arg-type]
+        sample_validator("string")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_class():
@@ -73,7 +73,7 @@ def test_validator_protocol_with_class():
         validator_instance(-5)
 
     with pytest.raises(ConfigValidationError):
-        validator_instance("string")  # type: ignore[arg-type]
+        validator_instance("string")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_runtime_checkable():
@@ -92,7 +92,7 @@ def test_validator_protocol_runtime_checkable():
         another_validator("")  # Empty string
 
     with pytest.raises(ConfigValidationError):
-        another_validator(123)  # type: ignore[arg-type]
+        another_validator(123)  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_lambda():
@@ -113,7 +113,7 @@ def test_validator_protocol_with_lambda():
         lambda_validator(-1.0)
 
     with pytest.raises(ConfigValidationError):
-        lambda_validator("string")  # type: ignore[arg-type]
+        lambda_validator("string")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_complex_type():
@@ -131,10 +131,10 @@ def test_validator_protocol_with_complex_type():
 
     # Test invalid case
     with pytest.raises(ConfigValidationError):
-        list_validator([1, "two", 3])  # type: ignore[list-item]
+        list_validator([1, "two", 3])  # value_type: ignore[list-item]
 
     with pytest.raises(ConfigValidationError):
-        list_validator("not a list")  # type: ignore[arg-type]
+        list_validator("not a list")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_noop():
@@ -195,7 +195,7 @@ def test_validator_protocol_with_optional():
         optional_validator(-5)
 
     with pytest.raises(ConfigValidationError):
-        optional_validator("string")  # type: ignore[arg-type]
+        optional_validator("string")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_union():
@@ -214,10 +214,10 @@ def test_validator_protocol_with_union():
 
     # Test invalid case
     with pytest.raises(ConfigValidationError):
-        union_validator(3.14)  # type: ignore[arg-type]
+        union_validator(3.14)  # value_type: ignore[arg-value_type]
 
     with pytest.raises(ConfigValidationError):
-        union_validator([])  # type: ignore[arg-type]
+        union_validator([])  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_custom_exception():
@@ -239,7 +239,7 @@ def test_validator_protocol_with_custom_exception():
         custom_exception_validator(-5)
 
     with pytest.raises(CustomValidationError):
-        custom_exception_validator("string")  # type: ignore[arg-type]
+        custom_exception_validator("string")  # value_type: ignore[arg-value_type]
 
 
 def test_validator_protocol_with_nested():
@@ -257,7 +257,7 @@ def test_validator_protocol_with_nested():
 
     # Test invalid case
     with pytest.raises(ConfigValidationError):
-        nested_validator({"a": 1, "b": "two"})  # type: ignore[dict-item]
+        nested_validator({"a": 1, "b": "two"})  # value_type: ignore[dict-item]
 
     with pytest.raises(ConfigValidationError):
-        nested_validator("not a dict")  # type: ignore[arg-type]
+        nested_validator("not a dict")  # value_type: ignore[arg-value_type]

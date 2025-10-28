@@ -46,6 +46,14 @@ class ParamRegistry:
         if existed and override:
             logger.debug("Spec overridden for %r", key)
         self._register_aliases(aliases, key, override)
+        # Invalidate any external caches (e.g. resolve_param_name lru cache)
+        try:
+            clear_fn = getattr(self, "_clear_caches", None)
+            if callable(clear_fn):
+                clear_fn()
+        except Exception:
+            # best-effort: ignore cache-clear failures
+            pass
         logger.debug(
             "Register complete: specs=%d aliases=%d keys(sample)=%r",
             len(self._specs),
@@ -61,6 +69,13 @@ class ParamRegistry:
                 raise ConfigValidationError({a: f"Alias already used for {self._aliases[ak]}."})
             self._aliases[ak] = key
             logger.debug("Alias set: %r -> %r", ak, key)
+        # Invalidate resolve caches when aliases change
+        try:
+            clear_fn = getattr(self, "_clear_caches", None)
+            if callable(clear_fn):
+                clear_fn()
+        except Exception:
+            pass
 
     def has(self, name_or_alias: Union[str, Enum]) -> bool:
         try:
@@ -83,6 +98,12 @@ class ParamRegistry:
         return key
 
     def _resolve_key(self, name_or_alias: Union[str, Enum]) -> str:
+        # If name_or_alias already looks like a key, try and use it directly
+        if name_or_alias in self._specs:
+            return name_or_alias
+        elif name_or_alias in self._aliases:
+            return self._aliases[name_or_alias]
+
         # Detailed resolution logs
         logger.debug(
             "Resolving key for: %r (%s) | specs=%d aliases=%d",
@@ -91,6 +112,7 @@ class ParamRegistry:
             len(self._specs),
             len(self._aliases),
         )
+
         if _is_enum(name_or_alias):
             enum_val = getattr(name_or_alias, "value", None)
             if not isinstance(enum_val, str):
@@ -136,6 +158,12 @@ class ParamRegistry:
         logger.debug("Clearing registry: specs=%d aliases=%d", len(self._specs), len(self._aliases))
         self._specs.clear()
         self._aliases.clear()
+        try:
+            clear_fn = getattr(self, "_clear_caches", None)
+            if callable(clear_fn):
+                clear_fn()
+        except Exception:
+            pass
         logger.debug("Registry cleared.")
 
 

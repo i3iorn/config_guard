@@ -3,27 +3,28 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from config_guard.exceptions import ConfigValidationError
-from config_guard.params import get_param_spec, resolve_param_name
+from config_guard.params import resolve_and_get
 
 
 class ConfigValidator:
-    def validate_value(self, key: str, value: Any) -> None:
+    def validate_value(self, key: str, value: Any) -> str:
         if not isinstance(key, str):
             raise ConfigValidationError({str(key): "Key must be a str."})
 
         # Resolve through registry (raises ConfigValidationError if unknown)
-        name = resolve_param_name(key)
-        spec = get_param_spec(name)
+        name, spec = resolve_and_get(key)
 
         errors: Dict[str, str] = {}
         try:
-            # Primary validation via ParamSpec (type, bounds, and custom validator)
+            # Primary validation via ParamSpec (value_type, bounds, and custom validator)
             spec.validate(value)
         except ConfigValidationError as exc:
             errors.update(exc.errors)
 
         if errors:
             raise ConfigValidationError(errors, name, value)
+        # Return canonical name so callers don't need to resolve again
+        return name
 
     def validate_mapping(self, mapping: Dict[str, Any]) -> None:
         errors: Dict[str, str] = {}

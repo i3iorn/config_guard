@@ -99,7 +99,7 @@ def test_appconfig_register_hook_and_trigger(app):
 
     # error case: register non-callable
     with pytest.raises(TypeError):
-        app.register_post_update_hook(123)  # type: ignore[arg-type]
+        app.register_post_update_hook(123)  # value_type: ignore[arg-value_type]
 
 
 def test_appconfig_temp_update_success_and_error(app):
@@ -316,13 +316,13 @@ def test_appconfig_lock_status_after_multiple_teardowns():
 def test_config_initialization_with_schema():
     schema = {
         "MAX_CONCURRENCY": {
-            "type": int,
+            "value_type": int,
             "default": 10,
             "min": 1,
             "max": 100,
         },
         "VERIFY": {
-            "type": bool,
+            "value_type": bool,
             "default": True,
         },
     }
@@ -340,17 +340,17 @@ def test_config_initialization_with_schema():
 def test_appconfig_init_with_new_schema_params():
     schema = {
         "MAX_CONCURRENCY": {
-            "type": int,
+            "value_type": int,
             "default": 10,
             "min": 1,
             "max": 100,
         },
         "VERIFY": {
-            "type": bool,
+            "value_type": bool,
             "default": True,
         },
         "NEW_PARAM": {
-            "type": str,
+            "value_type": str,
             "default": "default",
             "min_length": 1,
             "max_length": 50,

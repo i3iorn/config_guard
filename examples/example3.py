@@ -5,7 +5,7 @@ from config_guard import AppConfig, ConfigLockedError, list_params, register_par
 cfg = AppConfig()
 register_param(
     "verify",
-    type=bool,
+    value_type=bool,
     default=True,
     description="Whether to verify SSL certificates",
 )

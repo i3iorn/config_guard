@@ -21,7 +21,9 @@ class P(enum.Enum):
 
 
 def test_paramspec_validate_success_and_failures():
-    ps = ParamSpec(name="X", default=5, type=int, bounds=(1, 10), validator=lambda v: v % 2 == 1)
+    ps = ParamSpec(
+        name="X", default=5, value_type=int, bounds=(1, 10), validator=lambda v: v % 2 == 1
+    )
     ps.validate(5)
 
     with pytest.raises(ConfigValidationError):
@@ -29,19 +31,19 @@ def test_paramspec_validate_success_and_failures():
     with pytest.raises(ConfigValidationError):
         ps.validate(4)  # validator fails
     with pytest.raises(ConfigValidationError):
-        ps.validate("str")  # wrong type
+        ps.validate("str")  # wrong value_type
 
 
 def test_paramspec_to_mapping_contains_optionals():
-    ps = ParamSpec(name="Y", default=None, type=(int, type(None)), description="desc")
+    ps = ParamSpec(name="Y", default=None, value_type=(int, type(None)), description="desc")
     m = ps.to_mapping()
-    assert m["default"] is None and m["type"]
+    assert m["default"] is None and m["value_type"]
     assert m["description"] == "desc"
 
 
 def test_paramregistry_register_and_get_and_alias_and_override():
     reg = ParamRegistry()
-    ps = ParamSpec(name="A", default=1, type=int)
+    ps = ParamSpec(name="A", default=1, value_type=int)
     reg.register(ps, aliases=("alias_a",))
 
     assert reg.has("A") is True
@@ -50,7 +52,7 @@ def test_paramregistry_register_and_get_and_alias_and_override():
     assert reg.resolve_name("alias_a") == "A"
 
     # Override
-    ps2 = ParamSpec(name="A", default=2, type=int)
+    ps2 = ParamSpec(name="A", default=2, value_type=int)
     reg.register(ps2, override=True)
     assert reg.get("A").default == 2
 
@@ -60,10 +62,10 @@ def test_paramregistry_register_and_get_and_alias_and_override():
 
     # alias conflict
     reg2 = ParamRegistry()
-    reg2.register(ParamSpec(name="A", default=1, type=int), aliases=("X",))
-    reg2.register(ParamSpec(name="B", default=1, type=int))
+    reg2.register(ParamSpec(name="A", default=1, value_type=int), aliases=("X",))
+    reg2.register(ParamSpec(name="B", default=1, value_type=int))
     with pytest.raises(ConfigDuplicateError):
-        reg2.register(ParamSpec(name="B", default=1, type=int), aliases=("X",))
+        reg2.register(ParamSpec(name="B", default=1, value_type=int), aliases=("X",))
 
 
 def test_paramregistry_unknown_param_errors():
@@ -76,8 +78,8 @@ def test_paramregistry_unknown_param_errors():
 
 def test_paramregistry_all_names_and_clear():
     reg = ParamRegistry()
-    reg.register(ParamSpec(name="A", default=1, type=int))
-    reg.register(ParamSpec(name="B", default=1, type=int))
+    reg.register(ParamSpec(name="A", default=1, value_type=int))
+    reg.register(ParamSpec(name="B", default=1, value_type=int))
     names = reg.all_names()
     assert names == ("A", "B")
     reg.clear()
@@ -100,12 +102,12 @@ def test_module_functions_unknown_param_errors():
     with pytest.raises(ConfigNotFoundError):
         resolve_param_name("UNKNOWN")
     with pytest.raises(ConfigNotFoundError):
-        resolve_param_name(123)  # invalid type
+        resolve_param_name(123)  # invalid value_type
 
 
 def test_paramregistry_enum_alias_handling():
     reg = ParamRegistry()
-    ps = ParamSpec(name="MAX_CONCURRENCY", default=5, type=int)
+    ps = ParamSpec(name="MAX_CONCURRENCY", default=5, value_type=int)
     reg.register(ps, aliases=("MC",))
 
     assert reg.has(P.MC) is True
@@ -123,7 +125,7 @@ def test_paramregistry_enum_alias_handling():
 
 def test_paramregistry_logging_on_operations(caplog):
     reg = ParamRegistry()
-    ps = ParamSpec(name="A", default=1, type=int)
+    ps = ParamSpec(name="A", default=1, value_type=int)
     with caplog.at_level("DEBUG"):
         reg.register(ps, aliases=("alias_a",))
         assert any("Register called:" in msg for msg in caplog.messages)
@@ -139,12 +141,12 @@ def test_paramregistry_logging_on_operations(caplog):
 
 
 def test_paramspec_bounds_check_and_has_bounds():
-    ps_with_bounds = ParamSpec(name="B", default=5, type=int, bounds=(1, 10))
+    ps_with_bounds = ParamSpec(name="B", default=5, value_type=int, bounds=(1, 10))
     assert ps_with_bounds.has_bounds() is True
     assert ps_with_bounds._bounds_check(5) is True
     assert ps_with_bounds._bounds_check(0) is False
 
-    ps_without_bounds = ParamSpec(name="C", default=5, type=int)
+    ps_without_bounds = ParamSpec(name="C", default=5, value_type=int)
     assert ps_without_bounds.has_bounds() is False
     assert ps_without_bounds._bounds_check(100) is True  # Always true without bounds
 
@@ -153,7 +155,7 @@ def test_paramspec_validator_exception_handling():
     def faulty_validator(v):
         raise ValueError("Intentional error")
 
-    ps = ParamSpec(name="D", default=5, type=int, validator=faulty_validator)
+    ps = ParamSpec(name="D", default=5, value_type=int, validator=faulty_validator)
     with pytest.raises(ConfigValidationError) as exc_info:
         ps.validate(5)
     assert "Custom validator raised exception" in str(exc_info.value)
@@ -161,8 +163,8 @@ def test_paramspec_validator_exception_handling():
 
 def test_paramregistry_clear_and_all_names():
     reg = ParamRegistry()
-    reg.register(ParamSpec(name="A", default=1, type=int))
-    reg.register(ParamSpec(name="B", default=2, type=int))
+    reg.register(ParamSpec(name="A", default=1, value_type=int))
+    reg.register(ParamSpec(name="B", default=2, value_type=int))
     assert set(reg.all_names()) == {"A", "B"}
     reg.clear()
     assert reg.all_names() == ()
@@ -170,25 +172,25 @@ def test_paramregistry_clear_and_all_names():
 
 def test_paramregistry_register_alias_conflict_logging(caplog):
     reg = ParamRegistry()
-    reg.register(ParamSpec(name="A", default=1, type=int), aliases=("X",))
+    reg.register(ParamSpec(name="A", default=1, value_type=int), aliases=("X",))
     with caplog.at_level("ERROR"):
         with pytest.raises(ConfigValidationError):
-            reg.register(ParamSpec(name="B", default=2, type=int), aliases=("X",))
+            reg.register(ParamSpec(name="B", default=2, value_type=int), aliases=("X",))
         assert any("Alias conflict" in msg for msg in caplog.messages)
 
 
 def test_paramregistry_register_duplicate_without_override_logging(caplog):
     reg = ParamRegistry()
-    reg.register(ParamSpec(name="A", default=1, type=int))
+    reg.register(ParamSpec(name="A", default=1, value_type=int))
     with caplog.at_level("ERROR"):
         with pytest.raises(ConfigDuplicateError):
-            reg.register(ParamSpec(name="A", default=2, type=int))
+            reg.register(ParamSpec(name="A", default=2, value_type=int))
         assert any("already registered" in msg for msg in caplog.messages)
 
 
 def test_parmregistry_register_string_with_bounds():
     reg = ParamRegistry()
-    ps = ParamSpec(name="STR_PARAM", default="hello", type=str, bounds=(3, 10))
+    ps = ParamSpec(name="STR_PARAM", default="hello", value_type=str, bounds=(3, 10))
     reg.register(ps)
     assert reg.get("STR_PARAM").name == "STR_PARAM"
 
@@ -201,7 +203,7 @@ def test_parmregistry_register_string_with_bounds():
 
 def test_paramregistry_register_list_with_bounds():
     reg = ParamRegistry()
-    ps = ParamSpec(name="LIST_PARAM", default=[1, 2], type=list, bounds=(1, 5))
+    ps = ParamSpec(name="LIST_PARAM", default=[1, 2], value_type=list, bounds=(1, 5))
     reg.register(ps)
     assert reg.get("LIST_PARAM").name == "LIST_PARAM"
     ps.validate([1])  # valid
@@ -214,7 +216,7 @@ def test_paramregistry_register_list_with_bounds():
 
 def test_paramregistry_register_int_with_min_max():
     reg = ParamRegistry()
-    ps = ParamSpec(name="INT_PARAM", default=10, type=int, bounds=(1, 100))
+    ps = ParamSpec(name="INT_PARAM", default=10, value_type=int, bounds=(1, 100))
     reg.register(ps)
     assert reg.get("INT_PARAM").name == "INT_PARAM"
     ps.validate(50)  # valid
@@ -226,7 +228,7 @@ def test_paramregistry_register_int_with_min_max():
 
 def test_paramregistry_register_float_with_min_max():
     reg = ParamRegistry()
-    ps = ParamSpec(name="FLOAT_PARAM", default=1.5, type=float, bounds=(0.0, 10.0))
+    ps = ParamSpec(name="FLOAT_PARAM", default=1.5, value_type=float, bounds=(0.0, 10.0))
     reg.register(ps)
     assert reg.get("FLOAT_PARAM").name == "FLOAT_PARAM"
     ps.validate(5.5)  # valid
@@ -238,7 +240,7 @@ def test_paramregistry_register_float_with_min_max():
 
 def test_paramregistry_register_with_min_length_max_length():
     reg = ParamRegistry()
-    ps = ParamSpec(name="STR_PARAM_LEN", default="test", type=str, bounds=(2, 10))
+    ps = ParamSpec(name="STR_PARAM_LEN", default="test", value_type=str, bounds=(2, 10))
     reg.register(ps)
     assert reg.get("STR_PARAM_LEN").name == "STR_PARAM_LEN"
     ps.validate("ok")  # valid
@@ -251,38 +253,44 @@ def test_paramregistry_register_with_min_length_max_length():
 
 def test_paramregistry_register_with_invalid_bounds_combination():
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS", default=5, type=int, bounds=(1, 10), min=1)
+        register_param(name="INVALID_BOUNDS", default=5, value_type=int, bounds=(1, 10), min=1)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_2", default=5, type=int, bounds=(1, 10), max=10)
+        register_param(name="INVALID_BOUNDS_2", default=5, value_type=int, bounds=(1, 10), max=10)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_3", default="test", type=str, min=1)
+        register_param(name="INVALID_BOUNDS_3", default="test", value_type=str, min=1)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_4", default=5, type=int, min_length=1)
+        register_param(name="INVALID_BOUNDS_4", default=5, value_type=int, min_length=1)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_5", default=[1, 2], type=list, min=1)
+        register_param(name="INVALID_BOUNDS_5", default=[1, 2], value_type=list, min=1)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_6", default=5, type=int, min_length=1)
+        register_param(name="INVALID_BOUNDS_6", default=5, value_type=int, min_length=1)
 
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_7", default="test", type=str, max=10)
+        register_param(name="INVALID_BOUNDS_7", default="test", value_type=str, max=10)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_8", default=[1, 2], type=list, max=10)
+        register_param(name="INVALID_BOUNDS_8", default=[1, 2], value_type=list, max=10)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_9", default=5, type=int, max_length=10)
+        register_param(name="INVALID_BOUNDS_9", default=5, value_type=int, max_length=10)
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_10", default=5, type=int, min_length=1, max_length=10)
+        register_param(
+            name="INVALID_BOUNDS_10", default=5, value_type=int, min_length=1, max_length=10
+        )
     with pytest.raises(ValueError):
-        register_param(name="INVALID_BOUNDS_11", default=5, type=int, min=1, max=10, bounds=(1, 10))
+        register_param(
+            name="INVALID_BOUNDS_11", default=5, value_type=int, min=1, max=10, bounds=(1, 10)
+        )
 
 
 def test_paramregistry_register_with_non_tuple_bounds():
     with pytest.raises(ValueError):
-        register_param(name="NON_TUPLE_BOUNDS", default=5, type=int, bounds=10)  # should be a tuple
+        register_param(
+            name="NON_TUPLE_BOUNDS", default=5, value_type=int, bounds=10
+        )  # should be a tuple
     with pytest.raises(ValueError):
         register_param(
             name="NON_TUPLE_BOUNDS_2",
             default=5,
-            type=int,
+            value_type=int,
             bounds=(1, 2, 3),  # should be a tuple of length 2
         )
 
@@ -292,28 +300,28 @@ def test_paramregistry_register_with_invalid_type_for_min_max():
         register_param(
             name="INVALID_MIN_TYPE",
             default="test",
-            type=str,
+            value_type=str,
             min=1,  # min can only be used with int or float types
         )
     with pytest.raises(ValueError):
         register_param(
             name="INVALID_MAX_TYPE",
             default="test",
-            type=str,
+            value_type=str,
             max=10,  # max can only be used with int or float types
         )
     with pytest.raises(ValueError):
         register_param(
             name="INVALID_MIN_LENGTH_TYPE",
             default=5,
-            type=int,
+            value_type=int,
             min_length=1,  # min_length can only be used with str, list, tuple, or dict types
         )
     with pytest.raises(ValueError):
         register_param(
             name="INVALID_MAX_LENGTH_TYPE",
             default=5,
-            type=int,
+            value_type=int,
             max_length=10,  # max_length can only be used with str, list, tuple, or dict types
         )
 

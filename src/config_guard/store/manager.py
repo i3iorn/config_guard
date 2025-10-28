@@ -5,7 +5,7 @@ from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Dict, Optional, Tuple
 
-from config_guard.params import get_param_spec, resolve_param_name
+from config_guard.params import get_param_spec, resolve_and_get, resolve_param_name
 from config_guard.params.spec import ParamSpec
 from config_guard.store.adaptors import PersistanceAdapterProtocol
 from config_guard.utils import _immutable_copy
@@ -32,42 +32,46 @@ class ConfigStore:
     def allows_mutable_types(self) -> bool:
         return self._mutable_types
 
-    def set(self, key: str, value: Any, *, permanent: bool) -> None:
-        key = resolve_param_name(key)
+    def set(self, key: str, value: Any, *, permanent: bool, reason: str = "") -> None:
+        # Resolve and fetch ParamSpec in one call to avoid double lookups
+        name, param_spec = resolve_and_get(key)
+        if param_spec.require_reason and not reason:
+            logger.error("Setting config key '%s' requires a reason", name)
+            raise ValueError(f"Setting config key '{name}' requires a reason")
         tgt = self._config if permanent else self._use_once
         imm_value = _immutable_copy(value)
-        param_spec = get_param_spec(key)
 
-        self._check_type(key, imm_value)
+        self._check_type(name, imm_value, param_spec)
         self._check_bounds(param_spec, imm_value)
         param_spec.validate(imm_value)
 
-        tgt[key] = imm_value
+        tgt[name] = imm_value
 
-    def _check_type(self, key: str, value: Any) -> None:
+    def _check_type(self, key: str, value: Any, param_spec: ParamSpec | None = None) -> None:
         if key in self._config and not self._mutable_types:
             existing_type_obj = type(self._config[key])
-            param_spec = get_param_spec(key)
+            if param_spec is None:
+                param_spec = get_param_spec(key)
             new_type = type(value)
 
             existing_types: Tuple[type, ...] = (existing_type_obj,)
 
-            if isinstance(param_spec.type, tuple):
-                param_spec_types: Tuple[type, ...] = param_spec.type
+            if isinstance(param_spec.value_type, tuple):
+                param_spec_types: Tuple[type, ...] = param_spec.value_type
             else:
-                param_spec_types = (param_spec.type,)
+                param_spec_types = (param_spec.value_type,)
 
             allowed_types: Tuple[type, ...] = param_spec_types + existing_types
 
             if new_type not in allowed_types:
                 logger.error(
-                    "Attempted to change type of config key '%s' from %s to %s",
+                    "Attempted to change value_type of config key '%s' from %s to %s",
                     key,
                     existing_types,
                     new_type,
                 )
                 raise ValueError(
-                    f"Cannot change type of config key '{key}' from {existing_types} to {new_type}"
+                    f"Cannot change value_type of config key '{key}' from {existing_types} to {new_type}"
                 )
 
     def _check_bounds(self, param_spec: ParamSpec, value: Any) -> None:

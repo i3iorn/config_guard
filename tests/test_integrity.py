@@ -80,8 +80,8 @@ def test_integrity_start_checker_and_join():
 def test_integrity_start_checker_triggers_on_violation():
     ig = IntegrityGuard()
     # set stale checksum that won't match
-    ig._last_snapshot = {"a": 1}  # type: ignore[attr-defined]
-    ig._last_checksum = "not-matching"  # type: ignore[attr-defined]
+    ig._last_snapshot = {"a": 1}  # value_type: ignore[attr-defined]
+    ig._last_checksum = "not-matching"  # value_type: ignore[attr-defined]
 
     called = []
 

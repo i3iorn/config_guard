@@ -1,9 +1,11 @@
 """
-AppConfig: A robust, singleton configuration facade with validation, locking, integrity checks, and hooks.
+AppConfig: A robust configuration facade with validation, locking, integrity checks, and hooks.
 
 - Enforces immutability and thread safety for configuration state.
 - Supports validation, integrity, and lifecycle management.
 - Designed for extensibility and safe runtime updates.
+- Provides clear error handling for configuration issues.
+- Includes comprehensive documentation and usage examples.
 """
 
 from __future__ import annotations
@@ -26,7 +28,11 @@ from config_guard.params import (
 )
 from config_guard.validation import ValidatorProtocol
 
+# Singleton instance for module-level access, can be used directly as global config
+Config = AppConfig()
+
 __all__ = [
+    "Config",
     "AppConfig",
     "ConfigValidationError",
     "ConfigLockedError",

@@ -5,7 +5,7 @@ if __name__ == "__main__":
     register_param(
         "your_param_name",
         default=42,
-        type=int,
+        value_type=int,
         bounds=(0, 1000),
         description="An example integer parameter",
     )

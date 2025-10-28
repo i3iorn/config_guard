@@ -34,7 +34,7 @@ def test_immutable_copy_basic_and_immutability():
 
     # MappingProxyType must be immutable
     with pytest.raises(TypeError):
-        dct_copy["new"] = 1  # type: ignore[index]
+        dct_copy["new"] = 1  # value_type: ignore[index]
 
 
 def test_immutable_copy_raises_on_bad_object():
@@ -106,9 +106,9 @@ def test_immutable_copy_with_nested_structures():
     assert isinstance(immutable["a"], tuple)
     assert isinstance(immutable["c"], MappingProxyType)
     with pytest.raises(TypeError):
-        immutable["a"] += (4,)  # type: ignore[operator]
+        immutable["a"] += (4,)  # value_type: ignore[operator]
     with pytest.raises(TypeError):
-        immutable["c"]["d"] = 5  # type: ignore[index]
+        immutable["c"]["d"] = 5  # value_type: ignore[index]
 
 
 def test_immutable_copy_with_primitive():
